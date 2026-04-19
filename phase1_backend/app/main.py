@@ -31,6 +31,10 @@ os.makedirs("uploads/locations", exist_ok=True)
 # static images
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+# ticket QR images
+os.makedirs("tickets", exist_ok=True)
+app.mount("/tickets", StaticFiles(directory="tickets"), name="tickets")
+
 # CORS
 app.add_middleware(
     CORSMiddleware,

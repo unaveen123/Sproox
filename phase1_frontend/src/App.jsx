@@ -1,41 +1,60 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
 
-// Provider
+import Navbar from "./components/Navbar.jsx";
+import ProtectedRoute from "./components/ProtectedRoute.jsx";
+
+import Login from "./pages/user/Login.jsx";
+import Register from "./pages/user/Register.jsx";
+import Movies from "./pages/user/Movies.jsx";
+import LocationDetails from "./pages/user/LocationDetails.jsx";
+import Seats from "./pages/user/Seats.jsx";
+import Summary from "./pages/user/Summary.jsx";
+import Bookings from "./pages/user/Bookings.jsx";
+import Profile from "./pages/user/Profile.jsx";
+import BookingSuccess from "./pages/user/BookingSuccess.jsx";
+import Payment from "./pages/user/Payment.jsx";
+import VerifyOTP from "./pages/user/VerifyOTP.jsx";
+import ForgotPassword from "./pages/user/ForgotPassword.jsx";
+import Settings from "./pages/user/Settings.jsx";
+
 import TheaterDashboard from "./pages/provider/TheaterDashboard.jsx";
 import AddScreen from "./pages/provider/AddScreen.jsx";
-import AddSeatCategory from "./pages/provider/AddSeatCategory";
-import GenerateSeats from "./pages/provider/GenerateSeats";
-import AddTimeslot from "./pages/provider/AddTimeslot";
+import AddSeatCategory from "./pages/provider/AddSeatCategory.jsx";
+import GenerateSeats from "./pages/provider/GenerateSeats.jsx";
+import AddTimeslot from "./pages/provider/AddTimeslot.jsx";
 import DeleteScreen from "./pages/provider/DeleteScreen.jsx";
 import DeleteCompletedShows from "./pages/provider/DeleteCompletedShows.jsx";
-
-// User
-import UserHome from "./pages/user/UserHome";
-import LocationDetails from "./pages/user/LocationDetails";
-import SeatSelection from "./pages/user/SeatSelection";
-import Profile from "./pages/user/Profile";
-import SelectScreenTime from "./pages/user/SelectScreenTime"; // ✅ NEW
 
 function App() {
   return (
     <BrowserRouter>
+      <Navbar />
       <Routes>
+        <Route path="/" element={<Navigate to="/movies" replace />} />
+        <Route path="/movies" element={<Movies />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Register />} />
+        <Route path="/register" element={<Navigate to="/signup" replace />} />
+        <Route path="/verify-otp" element={<VerifyOTP />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
 
-        {/* PROVIDER */}
-        <Route path="/provider" element={<TheaterDashboard />} />
-        <Route path="/provider/add-screen" element={<AddScreen />} />
-        <Route path="/provider/seat-categories" element={<AddSeatCategory />} />
-        <Route path="/provider/generate-seats" element={<GenerateSeats />} />
-        <Route path="/provider/add-timeslot" element={<AddTimeslot />} />
-        <Route path="/provider/delete-screen" element={<DeleteScreen />} />
-        <Route path="/provider/delete-completed-shows" element={<DeleteCompletedShows />} />
-
-        {/* USER */}
-        <Route path="/" element={<UserHome />} />
-        <Route path="/location/:id" element={<LocationDetails />} />
-        <Route path="/select/:id" element={<SelectScreenTime />} /> {/* ✅ IMPORTANT */}
-        <Route path="/seats/:id" element={<SeatSelection />} />
-        <Route path="/profile" element={<Profile />} />
+        <Route element={<ProtectedRoute />}>
+          <Route path="/shows/:id" element={<LocationDetails />} />
+          <Route path="/seats/:id" element={<Seats />} />
+          <Route path="/summary" element={<Summary />} />
+          <Route path="/payment" element={<Payment />} />
+          <Route path="/bookings" element={<Bookings />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/booking-success" element={<BookingSuccess />} />
+          <Route path="/provider/dashboard" element={<TheaterDashboard />} />
+          <Route path="/add-screen" element={<AddScreen />} />
+          <Route path="/seat-categories" element={<AddSeatCategory />} />
+          <Route path="/generate-seats" element={<GenerateSeats />} />
+          <Route path="/add-timeslot" element={<AddTimeslot />} />
+          <Route path="/delete-screen" element={<DeleteScreen />} />
+          <Route path="/delete-completed-shows" element={<DeleteCompletedShows />} />
+        </Route>
 
       </Routes>
     </BrowserRouter>

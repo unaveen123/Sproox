@@ -16,29 +16,27 @@ const SelectScreenTime = () => {
     fetchTimeslots();
   }, []);
 
-  // 🔥 FIXED: USING PROVIDER API WITH TOKEN
+  // ================= FETCH SCREENS =================
   const fetchScreens = async () => {
-  try {
-    const token = localStorage.getItem("token");
+    try {
+      const token = localStorage.getItem("token");
 
-    const res = await axios.get(
-      `http://127.0.0.1:8000/provider/location/${id}/screens`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
+      const res = await axios.get(
+        `http://127.0.0.1:8000/provider/location/${id}/screens`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
-    console.log("✅ SCREENS RESPONSE:", res.data);
+      setScreens(res.data || []);
+    } catch (err) {
+      console.error("❌ SCREEN ERROR:", err.response || err);
+    }
+  };
 
-    setScreens(res.data || []);
-  } catch (err) {
-    console.error("❌ SCREEN ERROR:", err.response || err);
-  }
-};
-
-  // ✅ TIMESLOTS (USER API OK)
+  // ================= FETCH TIMESLOTS =================
   const fetchTimeslots = async () => {
     try {
       const res = await axios.get(
@@ -48,15 +46,19 @@ const SelectScreenTime = () => {
       console.log("TIMESLOTS:", res.data);
       setTimeslots(res.data || []);
     } catch (err) {
-      console.error("❌ Error fetching timeslots:", err);
+      console.error("❌ TIMESLOT ERROR:", err);
     }
   };
 
+  // ✅ FIXED FILTER (IMPORTANT)
   const filteredTimeslots = selectedScreen
-    ? timeslots.filter((slot) => slot.screen_id === selectedScreen)
-    : timeslots;
+    ? timeslots.filter(
+        (slot) =>
+          String(slot.screen_id) === String(selectedScreen)
+      )
+    : [];
 
-  // 🚀 CONTINUE
+  // ================= CONTINUE =================
   const handleContinue = () => {
     if (!selectedScreen) {
       alert("Select screen");
@@ -68,10 +70,24 @@ const SelectScreenTime = () => {
       return;
     }
 
+    const selectedScreenObj = screens.find(
+      (s) => String(s.id) === String(selectedScreen)
+    );
+
+    const selectedSlotObj = filteredTimeslots.find(
+      (s) => s.slot_id === selectedTime
+    );
+
+    if (!selectedSlotObj) {
+      alert("Invalid slot");
+      return;
+    }
+
     navigate(`/seats/${id}`, {
       state: {
-        screen_id: selectedScreen,
-        slot_id: selectedTime,
+        screen: selectedScreenObj,
+        slot: selectedSlotObj,
+        slots: filteredTimeslots,
       },
     });
   };
@@ -97,9 +113,9 @@ const SelectScreenTime = () => {
                 setSelectedTime(null);
               }}
               className={`px-4 py-2 border rounded ${
-                selectedScreen === scr.id
+                String(selectedScreen) === String(scr.id)
                   ? "bg-blue-500 text-white"
-                  : ""
+                  : "bg-white"
               }`}
             >
               {scr.name}
@@ -112,11 +128,13 @@ const SelectScreenTime = () => {
       <h3 className="text-lg font-semibold mb-2">Time Slots</h3>
 
       <div className="flex gap-3 flex-wrap mb-6">
-        {filteredTimeslots.length === 0 ? (
+        {!selectedScreen ? (
+          <p className="text-gray-500">
+            Select a screen to see matching time slots.
+          </p>
+        ) : filteredTimeslots.length === 0 ? (
           <p className="text-red-500">
-            {selectedScreen
-              ? "No timeslots available for this screen"
-              : "No timeslots available"}
+            No time slots available for this screen.
           </p>
         ) : (
           filteredTimeslots.map((slot) => (
@@ -126,10 +144,19 @@ const SelectScreenTime = () => {
               className={`px-4 py-2 border rounded ${
                 selectedTime === slot.slot_id
                   ? "bg-green-500 text-white"
-                  : ""
+                  : "bg-white"
               }`}
             >
-              {slot.start_time} - {slot.end_time}
+              {/* 🔥 SHOW MOVIE INFO */}
+              <div className="font-semibold">
+                {slot.movie_name}
+              </div>
+              <div className="text-sm text-gray-600">
+                {slot.language}
+              </div>
+              <div>
+                {slot.start_time} - {slot.end_time}
+              </div>
             </button>
           ))
         )}

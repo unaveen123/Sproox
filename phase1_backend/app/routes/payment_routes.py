@@ -8,7 +8,9 @@ from datetime import datetime
 import os
 from app import schemas
 from app.utils.qr_generator import generate_qr_ticket
-from app.utils.email_service import send_ticket_email
+import hmac
+import hashlib
+import os
 
 router = APIRouter(prefix="/payment", tags=["Payment"])
 
@@ -19,73 +21,55 @@ client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_SECRET))
 
 
 # ============================================================
-# 💰 CREATE PAYMENT ORDER (DYNAMIC PRICE)
+# 💰 CREATE PAYMENT ORDER FOR ONE OR MORE BOOKINGS
 # ============================================================
-@router.post("/create-order/{booking_id}")
+@router.post("/create-order")
 def create_payment_order(
-        booking_id: str,
+        data: schemas.PaymentOrderRequest,
         db: Session = Depends(get_db),
         current_user: models.User = Depends(get_current_user)
 ):
 
-    booking = db.query(models.Booking).filter(
-        models.Booking.id == booking_id
-    ).first()
+    if not data.booking_ids:
+        raise HTTPException(status_code=400, detail="booking_ids are required")
 
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
+    bookings = db.query(models.Booking).filter(models.Booking.id.in_(data.booking_ids)).all()
 
-    if booking.status == "confirmed":
-        raise HTTPException(status_code=400, detail="Payment already completed")
+    if len(bookings) != len(set(data.booking_ids)):
+        raise HTTPException(status_code=404, detail="One or more bookings not found")
 
-    existing_payment = db.query(models.Payment).filter(
-        models.Payment.booking_id == booking_id
-    ).first()
+    total_amount = 0
+    for booking in bookings:
+        if booking.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You can only pay for your own bookings")
+        if booking.status == "confirmed":
+            raise HTTPException(status_code=400, detail="One or more bookings are already confirmed")
 
-    if existing_payment:
-        raise HTTPException(status_code=400, detail="Payment already initiated")
-
-    # 🎯 CO-WORKING
-    if booking.seat_id:
-        seat = db.query(models.Seat).filter(
-            models.Seat.id == booking.seat_id
-        ).first()
-
-        if not seat:
-            raise HTTPException(status_code=404, detail="Seat not found")
-
-        amount = int(seat.price_per_hour)
-
-    # 🎬 THEATER
-    elif booking.theater_seat_id:
-        seat = db.query(models.TheaterSeat).filter(
-            models.TheaterSeat.id == booking.theater_seat_id
-        ).first()
-
-        if not seat:
-            raise HTTPException(status_code=404, detail="Theater seat not found")
-
-        category = db.query(models.SeatCategory).filter(
-            models.SeatCategory.id == seat.category_id
-        ).first()
-
-        if not category:
-            raise HTTPException(status_code=404, detail="Seat category not found")
-
-        amount = int(category.price)
-
-    else:
-        raise HTTPException(status_code=400, detail="Invalid booking type")
+        if booking.seat_id:
+            seat = db.query(models.Seat).filter(models.Seat.id == booking.seat_id).first()
+            if not seat:
+                raise HTTPException(status_code=404, detail="Seat not found")
+            total_amount += int(seat.price_per_hour)
+        elif booking.theater_seat_id:
+            seat = db.query(models.TheaterSeat).filter(models.TheaterSeat.id == booking.theater_seat_id).first()
+            if not seat:
+                raise HTTPException(status_code=404, detail="Theater seat not found")
+            category = db.query(models.SeatCategory).filter(models.SeatCategory.id == seat.category_id).first()
+            if not category:
+                raise HTTPException(status_code=404, detail="Seat category not found")
+            total_amount += int(category.price)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid booking type")
 
     order = client.order.create({
-        "amount": amount * 100,
+        "amount": total_amount * 100,
         "currency": "INR",
         "payment_capture": 1
     })
 
     payment = models.Payment(
-        booking_id=booking_id,
-        amount=amount,
+        booking_id=bookings[0].id,
+        amount=total_amount,
         order_id=order["id"],
         status="pending"
     )
@@ -95,7 +79,7 @@ def create_payment_order(
 
     return {
         "order_id": order["id"],
-        "amount": amount,
+        "amount": total_amount,
         "currency": "INR"
     }
 
@@ -117,145 +101,42 @@ def verify_payment(
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
 
-    try:
-        pass
-    except:
+    expected_signature = hmac.new(
+        RAZORPAY_SECRET.encode(),
+        f"{data.order_id}|{data.payment_id}".encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    if expected_signature != data.signature:
         payment.status = "failed"
         db.commit()
         raise HTTPException(status_code=400, detail="Payment verification failed")
 
-    # ✅ update payment
     payment.payment_id = data.payment_id
     payment.status = "success"
 
-    # 🎟️ confirm booking
-    booking = db.query(models.Booking).filter(
-        models.Booking.id == payment.booking_id
-    ).first()
+    booking_ids = data.booking_ids or [payment.booking_id]
+    bookings = db.query(models.Booking).filter(models.Booking.id.in_(booking_ids)).all()
 
-    booking.status = "confirmed"
+    if len(bookings) != len(set(booking_ids)):
+        raise HTTPException(status_code=404, detail="One or more bookings not found")
 
-    # ============================================================
-    # 🎯 CO-WORKING
-    # ============================================================
-    if booking.seat_id:
-
-        seat = db.query(models.Seat).filter(
-            models.Seat.id == booking.seat_id
-        ).first()
-
-        location = seat.location
-
-        # 📧 SEND EMAIL (UPDATED)
-        send_ticket_email(
-            to_email=booking.user.email,
-            user_name=booking.user.name,
-            booking_type="coworking",
-
-            location_name=location.name,
-            location_address=location.address,
-            location_city=location.city,
-            booking_date=booking.booking_date,
-            booking_id=booking.id,
-            qr_path=None,  # temp
-
-            start_time=booking.slot.start_time,
-            end_time=booking.slot.end_time,
-
-            seat_number=seat.seat_number
-        )
-
-    # ============================================================
-    # 🎬 THEATER
-    # ============================================================
-    else:
-
-        seat = db.query(models.TheaterSeat).filter(
-            models.TheaterSeat.id == booking.theater_seat_id
-        ).first()
-
-        location = seat.location
-
-        screen = db.query(models.Screen).filter(
-            models.Screen.id == seat.screen_id
-        ).first()
-
-        slot = booking.slot
-
-        # 📧 SEND EMAIL (UPDATED)
-        send_ticket_email(
-            to_email=booking.user.email,
-            user_name=booking.user.name,
-            booking_type="theater",
-
-            location_name=location.name,
-            location_address=location.address,
-            location_city=location.city,
-            booking_date=booking.booking_date,
-            booking_id=booking.id,
-            qr_path=None,  # temp
-
-            start_time=slot.start_time,
-            end_time=slot.end_time,
-
-            movie_name=slot.movie_name,
-            screen_name=screen.name if screen else None,
-            seat_label=seat.seat_label,
-            language=slot.language
-        )
-
-    # ============================================================
-    # 🎫 GENERATE QR AFTER EMAIL DATA READY
-    # ============================================================
-    qr_path = generate_qr_ticket(booking)
-    booking.qr_code = qr_path
-
-    # 🔥 SEND EMAIL AGAIN WITH QR (FINAL)
-    if booking.seat_id:
-        send_ticket_email(
-            to_email=booking.user.email,
-            user_name=booking.user.name,
-            booking_type="coworking",
-
-            location_name=location.name,
-            location_address=location.address,
-            location_city=location.city,
-            booking_date=booking.booking_date,
-            booking_id=booking.id,
-            qr_path=qr_path,
-
-            start_time=booking.slot.start_time,
-            end_time=booking.slot.end_time,
-
-            seat_number=seat.seat_number
-        )
-    else:
-        send_ticket_email(
-            to_email=booking.user.email,
-            user_name=booking.user.name,
-            booking_type="theater",
-
-            location_name=location.name,
-            location_address=location.address,
-            location_city=location.city,
-            booking_date=booking.booking_date,
-            booking_id=booking.id,
-            qr_path=qr_path,
-
-            start_time=slot.start_time,
-            end_time=slot.end_time,
-
-            movie_name=slot.movie_name,
-            screen_name=screen.name if screen else None,
-            seat_label=seat.seat_label,
-            language=slot.language
-        )
+    qr_paths = []
+    for booking in bookings:
+        if booking.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="You can only pay for your own bookings")
+        booking.status = "confirmed"
+        qr_path = generate_qr_ticket(booking)
+        booking.qr_code = qr_path
+        qr_paths.append(qr_path)
 
     db.commit()
 
+    qr_urls = [f"/tickets/{os.path.basename(path)}" for path in qr_paths]
+
     return {
         "message": "Payment successful",
-        "booking_id": booking.id,
+        "booking_ids": [booking.id for booking in bookings],
         "payment_id": data.payment_id,
-        "qr_ticket": qr_path
+        "qr_tickets": qr_urls
     }

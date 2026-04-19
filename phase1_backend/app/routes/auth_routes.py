@@ -77,6 +77,32 @@ def verify_user_otp(data: schemas.OTPVerify, db: Session = Depends(get_db)):
 
     return {"message": "Account created successfully. Please login."}
 
+
+@router.post("/forgot-password")
+def forgot_password(data: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == data.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    generate_otp(data.email)
+    return {"message": "Password reset OTP sent to your email."}
+
+
+@router.post("/reset-password")
+def reset_password(data: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.email == data.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_otp(data.email, data.otp):
+        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
+
+    user.password = hash_password(data.new_password)
+    db.commit()
+
+    return {"message": "Password reset successfully. You can now login."}
+
+
 # LOGIN USER (OAUTH2 COMPATIBLE)
 @router.post("/login")
 def login_user(form_data: OAuth2PasswordRequestForm = Depends(),

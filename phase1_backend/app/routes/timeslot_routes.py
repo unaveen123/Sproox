@@ -8,7 +8,9 @@ from datetime import datetime
 router = APIRouter(prefix="/provider", tags=["Provider TimeSlots"])
 
 
-# helper → convert AM/PM to 24 hour time
+# =========================
+# ⏱️ HELPER FUNCTION
+# =========================
 def parse_time(time_str: str):
     try:
         return datetime.strptime(time_str.strip().upper(), "%I:%M %p").time()
@@ -22,7 +24,9 @@ def parse_time(time_str: str):
             )
 
 
-# ADD TIMESLOT
+# =========================
+# 🎬 ADD TIMESLOT
+# =========================
 @router.post("/location/{location_id}/add-timeslot")
 def add_timeslot(
     location_id: str,
@@ -35,6 +39,7 @@ def add_timeslot(
     current_user = Depends(get_current_user)
 ):
 
+    # 🔍 check location
     location = db.query(models.Location).filter(
         models.Location.id == location_id
     ).first()
@@ -42,6 +47,7 @@ def add_timeslot(
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
 
+    # 🔍 check provider ownership
     provider = db.query(models.Provider).filter(
         models.Provider.id == location.provider_id
     ).first()
@@ -49,14 +55,12 @@ def add_timeslot(
     if not provider or provider.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your location")
 
-    # ✅ DETECT TYPE USING SCREEN
+    # 🎬 check if theater
     is_theater = screen_id is not None
 
-    # 🎬 THEATER
     if is_theater:
-
         if not movie_name:
-            raise HTTPException(status_code=400, detail="movie_name required for theater")
+            raise HTTPException(status_code=400, detail="movie_name required")
 
         screen = db.query(models.Screen).filter(
             models.Screen.id == screen_id,
@@ -65,18 +69,17 @@ def add_timeslot(
 
         if not screen:
             raise HTTPException(status_code=404, detail="Screen not found")
-
     else:
         screen = None
 
-    # ⏱️ time parse
+    # ⏱️ parse time
     start = parse_time(start_time)
     end = parse_time(end_time)
 
     if start >= end:
         raise HTTPException(status_code=400, detail="End time must be after start time")
 
-    # 🔍 fetch slots
+    # 🔍 existing slots
     if is_theater:
         existing_slots = db.query(models.TimeSlot).filter(
             models.TimeSlot.location_id == location_id,
@@ -87,26 +90,16 @@ def add_timeslot(
             models.TimeSlot.location_id == location_id
         ).all()
 
-    # 📊 limit
+    # 📊 max limit
     if len(existing_slots) >= 10:
-        raise HTTPException(status_code=400, detail="Maximum 10 slots allowed")
+        raise HTTPException(status_code=400, detail="Max 10 slots allowed")
 
-    # ⛔ overlap
+    # ⛔ overlap check
     for slot in existing_slots:
         if not (end <= slot.start_time or start >= slot.end_time):
+            raise HTTPException(status_code=400, detail="Time overlap detected")
 
-            if is_theater:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Time overlap in {screen.name}"
-                )
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Time overlap detected"
-                )
-
-    # ✅ create
+    # ✅ create slot
     new_slot = models.TimeSlot(
         location_id=location_id,
         start_time=start,
@@ -118,16 +111,21 @@ def add_timeslot(
 
     db.add(new_slot)
     db.commit()
+    db.refresh(new_slot)
 
     return {
-        "message": f"Time slot added for {screen.name}" if screen else "Time slot added successfully"
+        "message": "Timeslot added successfully",
+        "data": {
+            "id": new_slot.id,
+            "movie_name": new_slot.movie_name,
+            "language": new_slot.language
+        }
     }
 
 
 # =========================
-# 🎟️ GET TIMESLOTS
+# 🎟️ GET TIMESLOTS (PROVIDER)
 # =========================
-
 @router.get("/location/{location_id}/timeslots")
 def get_timeslots(
     location_id: str,
@@ -137,4 +135,17 @@ def get_timeslots(
         models.TimeSlot.location_id == location_id
     ).all()
 
-    return slots
+    result = []
+
+    for slot in slots:
+        result.append({
+            "id": slot.id,
+            "location_id": slot.location_id,
+            "screen_id": slot.screen_id,
+            "start_time": slot.start_time.strftime("%I:%M %p"),
+            "end_time": slot.end_time.strftime("%I:%M %p"),
+            "movie_name": slot.movie_name,
+            "language": slot.language
+        })
+
+    return result

@@ -5,6 +5,7 @@ from app.dependencies import get_current_user
 from app import models, schemas
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, date
+import os
 
 router = APIRouter(prefix="/user", tags=["Booking"])
 
@@ -134,7 +135,25 @@ def book_seat(
         if not slot:
             raise HTTPException(status_code=404, detail="Time slot not found")
 
-        # 6️⃣ prevent duplicate
+        # 6️⃣ validate the chosen screen/slot combination
+        def normalize_screen_ref(value):
+            if value is None:
+                return None
+            normalized = str(value).strip().lower()
+            normalized = normalized.replace("screen", "").replace(" ", "")
+            return normalized
+
+        normalized_slot_screen = normalize_screen_ref(slot.screen_id)
+        normalized_seat_screen = normalize_screen_ref(seat.screen_id)
+
+        if (slot.screen_id and seat.screen_id and
+                normalized_slot_screen != normalized_seat_screen):
+            raise HTTPException(
+                status_code=400,
+                detail="Selected seat does not belong to the chosen screen"
+            )
+
+        # 7️⃣ prevent duplicate
         existing_booking = db.query(models.Booking).filter(
             models.Booking.theater_seat_id == data.theater_seat_id,
             models.Booking.slot_id == data.slot_id,
@@ -271,12 +290,17 @@ def get_booking_history(
         # =========================
         # 📦 COMMON DATA
         # =========================
+        qr_url = None
+        if booking.qr_code:
+            qr_url = f"/tickets/{os.path.basename(booking.qr_code)}"
+
         data.update({
             "booking_id": booking.id,
             "date": booking.booking_date,
             "start_time": slot.start_time.strftime("%I:%M %p"),
             "end_time": slot.end_time.strftime("%I:%M %p"),
-            "status": booking.status
+            "status": booking.status,
+            "qr_code_url": qr_url
         })
 
         # =========================
