@@ -16,6 +16,7 @@ import Payment from "./pages/user/Payment.jsx";
 import VerifyOTP from "./pages/user/VerifyOTP.jsx";
 import ForgotPassword from "./pages/user/ForgotPassword.jsx";
 import Settings from "./pages/user/Settings.jsx";
+import Ticket from "./pages/user/Ticket.jsx"; // ✅ NEW IMPORT
 
 import TheaterDashboard from "./pages/provider/TheaterDashboard.jsx";
 import AddScreen from "./pages/provider/AddScreen.jsx";
@@ -29,6 +30,7 @@ function App() {
   return (
     <BrowserRouter>
       <Navbar />
+
       <Routes>
         <Route path="/" element={<Navigate to="/movies" replace />} />
         <Route path="/movies" element={<Movies />} />
@@ -47,6 +49,11 @@ function App() {
           <Route path="/profile" element={<Profile />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/booking-success" element={<BookingSuccess />} />
+
+          {/* ✅ NEW ROUTE */}
+          <Route path="/ticket" element={<Ticket />} />
+
+          {/* Provider */}
           <Route path="/provider/dashboard" element={<TheaterDashboard />} />
           <Route path="/add-screen" element={<AddScreen />} />
           <Route path="/seat-categories" element={<AddSeatCategory />} />
@@ -55,7 +62,6 @@ function App() {
           <Route path="/delete-screen" element={<DeleteScreen />} />
           <Route path="/delete-completed-shows" element={<DeleteCompletedShows />} />
         </Route>
-
       </Routes>
     </BrowserRouter>
   );

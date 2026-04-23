@@ -367,3 +367,102 @@ def cancel_booking(
         "message": "Booking cancelled successfully",
         "booking_id": booking_id
     }
+
+
+# =====================================================================
+# 📧 SEND BOOKING CONFIRMATION EMAIL
+# =====================================================================
+
+@router.post("/send-booking-confirmation")
+def send_booking_confirmation(
+        data: dict,
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user)
+):
+    from app.utils.email_service import send_ticket_email
+
+    booking_ids = data.get("booking_ids") or []
+    if not booking_ids or not isinstance(booking_ids, list):
+        raise HTTPException(status_code=400, detail="booking_ids must be provided as a list")
+
+    bookings = db.query(models.Booking).filter(
+        models.Booking.id.in_(booking_ids),
+        models.Booking.user_id == current_user.id
+    ).all()
+
+    if len(bookings) != len(set(booking_ids)):
+        raise HTTPException(status_code=404, detail="One or more bookings not found")
+
+    if len(bookings) == 0:
+        raise HTTPException(status_code=400, detail="No valid bookings found")
+
+    first_booking = bookings[0]
+    slot = db.query(models.TimeSlot).filter(models.TimeSlot.id == first_booking.slot_id).first()
+    if not slot:
+        raise HTTPException(status_code=404, detail="Booking slot not found")
+
+    location = None
+    screen = None
+    seat_label = []
+    qr_path = None
+    booking_type = "theater"
+
+    if first_booking.theater_seat_id:
+        seat = db.query(models.TheaterSeat).filter(models.TheaterSeat.id == first_booking.theater_seat_id).first()
+        if seat:
+            location = db.query(models.Location).filter(models.Location.id == seat.location_id).first()
+            screen = db.query(models.Screen).filter(models.Screen.id == seat.screen_id).first() if seat.screen_id else None
+            seat_label = [b.seat_label or "-" for b in bookings]
+    else:
+        booking_type = "coworking"
+        seat = db.query(models.Seat).filter(models.Seat.id == first_booking.seat_id).first()
+        if seat:
+            location = db.query(models.Location).filter(models.Location.id == seat.location_id).first()
+            seat_label = [b.seat or "-" for b in bookings]
+
+    if first_booking.qr_code:
+        qr_path = first_booking.qr_code
+
+    theater_name = location.name if location else "Sproox Theater"
+    location_address = getattr(location, "address", "") or "Not available"
+    location_city = getattr(location, "city", "") or ""
+
+    movie_name = slot.movie_name if slot else "N/A"
+    language = slot.language if slot else "N/A"
+    start_time = slot.start_time
+    end_time = slot.end_time
+    booking_date = first_booking.booking_date
+
+    user_name = current_user.name or current_user.username or "Guest"
+
+    try:
+        send_ticket_email(
+            to_email=current_user.email,
+            user_name=user_name,
+            booking_type=booking_type,
+            location_name=theater_name,
+            location_address=location_address,
+            location_city=location_city,
+            booking_date=booking_date,
+            booking_id=first_booking.id,
+            qr_path=qr_path,
+            start_time=start_time,
+            end_time=end_time,
+            seat_number=", ".join(seat_label) if booking_type == "coworking" else None,
+            movie_name=movie_name,
+            screen_name=screen.name if screen else "N/A",
+            seat_label=", ".join(seat_label) if booking_type == "theater" else None,
+            language=language,
+        )
+
+        return {
+            "message": "Confirmation email sent successfully",
+            "email": current_user.email
+        }
+    except Exception as err:
+        import traceback
+        print(f"Email send error: {traceback.format_exc()}")
+        return {
+            "message": "Booking confirmed (email notification may have failed)",
+            "error": str(err)
+        }

@@ -1,10 +1,14 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext.jsx";
+import api from "../../services/api.js";
 
 const BookingSuccess = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { state } = location;
+  const [emailSent, setEmailSent] = useState(false);
 
   const bookings = state?.bookingDetails || [];
   const slot = state?.slot;
@@ -28,6 +32,25 @@ const BookingSuccess = () => {
     .join(", ");
 
   const displayedQrTickets = qrTickets.length > 0 ? [qrTickets[0]] : [];
+
+  // 📧 SEND CONFIRMATION EMAIL
+  useEffect(() => {
+    const sendConfirmationEmail = async () => {
+      if (emailSent || !user?.email || bookings.length === 0) return;
+
+      try {
+        await api.post("/user/send-booking-confirmation", {
+          booking_ids: bookingIds,
+        });
+        setEmailSent(true);
+      } catch (err) {
+        console.error("Failed to send confirmation email:", err);
+        setEmailSent(true);
+      }
+    };
+
+    sendConfirmationEmail();
+  }, []);
 
   if (!state || bookings.length === 0) {
     return <div className="p-10 text-center">No booking details found</div>;

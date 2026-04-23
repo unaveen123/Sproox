@@ -22,7 +22,7 @@ const Navbar = () => {
     <header className="bg-slate-950 text-white shadow-sm">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <Link to="/movies" className="text-xl font-bold tracking-tight">
-          CineBook
+          Sproox
         </Link>
 
         <nav className="hidden gap-4 md:flex">
@@ -168,30 +168,17 @@ const Navbar = () => {
                   ))}
                 </div>
 
-                <div className="mt-4 border-t border-slate-200 pt-4 space-y-2 text-sm">
+                <div className="mt-4 border-t border-slate-200 pt-4 text-sm">
+                  <p className="text-xs text-slate-500 mb-3">Need to manage your account?</p>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      const confirmDelete = window.confirm("Are you sure you want to delete your account? This action cannot be undone.");
-                      if (confirmDelete) {
-                        alert("Account deletion feature coming soon. Please contact support.");
-                        setShowProfile(false);
-                      }
-                    }}
-                    className="w-full rounded-3xl bg-rose-50 px-4 py-3 text-left font-semibold text-rose-600 hover:bg-rose-100 transition"
-                  >
-                    Delete Account
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      logout();
+                      navigate("/settings");
                       setShowProfile(false);
-                      navigate("/login");
                     }}
-                    className="w-full rounded-3xl bg-emerald-50 px-4 py-3 text-left font-semibold text-emerald-600 hover:bg-emerald-100 transition"
+                    className="w-full rounded-3xl bg-blue-50 px-4 py-3 text-left font-semibold text-blue-600 hover:bg-blue-100 transition"
                   >
-                    Logout
+                    Go to Settings
                   </button>
                 </div>
               </div>

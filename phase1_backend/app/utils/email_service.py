@@ -82,12 +82,12 @@ Hello {user_name},
 🆔 Booking ID: {booking_id}
 ━━━━━━━━━━━━━━━━━━━━━━━
 
+🎫 Your QR ticket is attached to this email.
 ⏳ Please arrive 15 minutes early.
-🎟 Show your QR ticket at entry.
 
-Enjoy your movie 🍿
+Enjoy your movie with Sproox! 🍿
 
-— Booking Team
+— Sproox Team
 """
 
     # =========================
@@ -112,12 +112,12 @@ Your workspace booking is CONFIRMED!
 🆔 Booking ID: {booking_id}
 ━━━━━━━━━━━━━━━━━━━━━━━
 
+🎫 Your QR ticket is attached to this email.
 ⏳ Please arrive 10 minutes early.
-📲 Show your QR ticket at entry.
 
-Thank you 🙌
+Thank you for booking with Sproox! 🙌
 
-— Workspace Booking Team
+— Sproox Team
 """
 
     msg.set_content(body)

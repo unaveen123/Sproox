@@ -1,150 +1,328 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import api from "../../services/api";
 import LoadingSpinner from "../../components/LoadingSpinner.jsx";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
 
 const Bookings = () => {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const navigate = useNavigate();
+  const [cancellingId, setCancellingId] = useState(null);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [shareMessage, setShareMessage] = useState("");
 
   useEffect(() => {
-    const fetchBookings = async () => {
-      try {
-        const res = await api.get("/user/booking-history");
-        const data = res.data || {};
-        
-        // Backend returns { active, completed, others }
-        if (data.active || data.completed || data.others) {
-          const allBookings = [
-            ...(data.active || []),
-            ...(data.completed || []),
-            ...(data.others || [])
-          ];
-          setBookings(allBookings);
-        } else if (Array.isArray(data)) {
-          setBookings(data);
-        } else {
-          setBookings([]);
-        }
-      } catch (err) {
-        setError(err.response?.data?.detail || err.message || "Unable to load bookings.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchBookings();
   }, []);
+
+  const fetchBookings = async () => {
+    try {
+      const res = await api.get("/user/booking-history");
+      const data = res.data || {};
+
+      let allBookings = [];
+
+      if (data.active || data.completed || data.others) {
+        allBookings = [
+          ...(data.active || []),
+          ...(data.completed || []),
+          ...(data.others || []),
+        ];
+      } else if (Array.isArray(data)) {
+        allBookings = data;
+      }
+
+      setBookings(allBookings);
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        err.message ||
+        "Unable to load bookings."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 🔥 GROUP BOOKINGS
+  const grouped = Object.values(
+    bookings.reduce((acc, b) => {
+      const key = b.slot_id || b.booking_id;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(b);
+      return acc;
+    }, {})
+  );
+
+  // ❌ CANCEL BOOKING WITH CONFIRMATION
+  const cancelBooking = async (group) => {
+    const bookingCount = group.length;
+    const totalPrice = group.reduce((sum, b) => sum + (b.price || 0), 0);
+    const seats = group.map((b) => b.seat).join(", ");
+
+    const confirmMsg = `Cancel booking for:\n\n${group[0].movie_name}\nSeats: ${seats}\nTotal: ₹${totalPrice}\n\nRefund will be processed to your original payment method.`;
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    setCancellingId(group[0].booking_id);
+    try {
+      await Promise.all(
+        group.map((b) =>
+          api.patch(`/user/cancel-booking/${b.booking_id}`)
+        )
+      );
+
+      setBookings((prev) =>
+        prev.filter(
+          (b) => !group.some((g) => g.booking_id === b.booking_id)
+        )
+      );
+
+      alert("✓ Booking cancelled successfully.\nRefund will be processed within 3-5 business days.");
+    } catch (err) {
+      console.error("Cancel error:", err);
+      alert(`Cancel failed: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  // 📄 DOWNLOAD PDF - SIMPLIFIED AND RELIABLE
+  const downloadPDF = async (group) => {
+    setDownloadingId(group[0].booking_id);
+    try {
+      const element = document.getElementById(`ticket-${group[0].booking_id}`);
+
+      if (!element) {
+        setShareMessage("❌ Ticket not found");
+        setTimeout(() => setShareMessage(""), 3000);
+        return;
+      }
+
+      // Wait for images to load
+      const images = element.querySelectorAll("img");
+      const imageLoads = Array.from(images).map(
+        (img) =>
+          new Promise((resolve) => {
+            if (img.complete) {
+              resolve();
+            } else {
+              img.addEventListener("load", resolve);
+              img.addEventListener("error", resolve);
+            }
+          })
+      );
+      await Promise.all(imageLoads);
+      
+      // Small delay for rendering
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      const canvas = await html2canvas(element, {
+        allowTaint: true,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        scale: 3,
+        logging: false,
+        imageTimeout: 15000,
+      });
+
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+      });
+
+      const imgWidth = 190;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const pageHeight = 277;
+
+      let heightLeft = imgHeight;
+      let position = 10;
+
+      pdf.addImage(imgData, "JPEG", 10, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight + 10;
+        pdf.addPage();
+        pdf.addImage(imgData, "JPEG", 10, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const movieName = (group[0].movie || group[0].movie_name || "ticket").replace(/[^a-z0-9]/gi, "");
+      pdf.save(`Sproox_${movieName}_${Date.now()}.pdf`);
+
+      setShareMessage("✓ Ticket downloaded successfully!");
+      setTimeout(() => setShareMessage(""), 3000);
+    } catch (err) {
+      console.error("PDF Download Error:", err);
+      setShareMessage("❌ Download failed. Please try again.");
+      setTimeout(() => setShareMessage(""), 4000);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  // 📤 SHARE - IMPROVED WITH WEB SHARE API
+  const shareTicket = async (group) => {
+    const seats = group.map((b) => b.seat).join(", ");
+    const totalPrice = group.reduce((sum, b) => sum + (b.price || 0), 0);
+    const movieTitle = group[0].movie || group[0].movie_name || group[0].workspace || "Movie";
+    
+    const shareData = {
+      title: `Sproox - ${movieTitle}`,
+      text: `🎬 Movie: ${movieTitle}
+🎭 Language: ${group[0].language}
+📍 Screen: ${group[0].screen}
+🕐 Time: ${group[0].start_time} - ${group[0].end_time}
+🎟 Seats: ${seats}
+💰 Total: ₹${totalPrice}
+
+Check out my booking on Sproox!`,
+    };
+
+    try {
+      // Try Web Share API first (mobile/modern browsers)
+      if (navigator.share) {
+        await navigator.share(shareData);
+        setShareMessage("✓ Shared successfully!");
+      } else {
+        // Fallback: Copy to clipboard
+        const text = shareData.text;
+        await navigator.clipboard.writeText(text);
+        setShareMessage("✓ Booking details copied to clipboard!");
+      }
+
+      setTimeout(() => setShareMessage(""), 3000);
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        console.error("Share error:", err);
+        // Try clipboard as last resort
+        try {
+          const text = shareData.text;
+          await navigator.clipboard.writeText(text);
+          setShareMessage("✓ Copied to clipboard!");
+          setTimeout(() => setShareMessage(""), 3000);
+        } catch (clipErr) {
+          alert("Share failed. Please try again.");
+        }
+      }
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 py-10">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
+
         <div className="mb-8 rounded-[2rem] bg-white p-8 shadow-lg">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-[0.3em] text-slate-500">Your bookings</p>
-              <h1 className="mt-3 text-4xl font-semibold text-slate-950">Booking History</h1>
-              <p className="mt-2 text-slate-600">View all of your completed and upcoming tickets.</p>
-            </div>
-            <button
-              onClick={() => navigate("/movies")}
-              className="rounded-full border border-slate-300 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100"
-            >
-              Browse theaters
-            </button>
-          </div>
+          <h1 className="text-3xl font-bold">My Bookings</h1>
         </div>
+
+        {shareMessage && (
+          <div className="mb-4 rounded-3xl bg-emerald-50 p-4 text-emerald-700 border border-emerald-200 text-center font-semibold">
+            {shareMessage}
+          </div>
+        )}
 
         {loading ? (
           <LoadingSpinner message="Loading bookings..." />
         ) : error ? (
-          <div className="rounded-3xl bg-white p-10 text-center text-red-600 shadow-sm">{error}</div>
-        ) : bookings.length === 0 ? (
-          <div className="rounded-3xl bg-white p-10 text-center text-slate-600 shadow-sm">You have no bookings yet.</div>
+          <div className="text-red-500">{error}</div>
+        ) : grouped.length === 0 ? (
+          <p className="text-center">No booking details found</p>
         ) : (
           <div className="space-y-6">
-            {bookings.map((booking) => {
+            {grouped.map((group, idx) => {
+              const first = group[0];
+
               return (
-                <div key={booking.booking_id || booking.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div>
-                      <h2 className="text-xl font-semibold text-slate-900">{booking.movie || booking.workspace || "Theater"}</h2>
-                      <p className="mt-1 text-sm text-slate-500">{booking.date || "Date not available"}</p>
-                    </div>
-                    <span className="rounded-full bg-slate-100 px-4 py-2 text-sm text-slate-700">{booking.status || "Confirmed"}</span>
-                  </div>
+                <div key={idx} className="bg-white p-6 rounded-2xl shadow">
 
-                  <div className="mt-6 grid gap-4 sm:grid-cols-2 md:grid-cols-3 text-sm text-slate-600">
-                    <div>
-                      <p className="font-medium text-slate-900">Theater</p>
-                      <p>{booking.workspace || "-"}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-slate-900">Time</p>
-                      <p>{booking.start_time ? `${booking.start_time} - ${booking.end_time || ""}` : "-"}</p>
-                    </div>
-                    <div>
-                      <p className="font-medium text-slate-900">Seat</p>
-                      <p>{booking.seat || "-"}</p>
-                    </div>
-                    {booking.language && (
-                      <div>
-                        <p className="font-medium text-slate-900">Language</p>
-                        <p>{booking.language}</p>
-                      </div>
-                    )}
-                    {booking.screen && (
-                      <div>
-                        <p className="font-medium text-slate-900">Screen</p>
-                        <p>{booking.screen}</p>
-                      </div>
-                    )}
-                    <div>
-                      <p className="font-medium text-slate-900">Total</p>
-                      <p>₹{booking.price || "-"}</p>
-                    </div>
-                  </div>
+                  {/* 🎟 REAL TICKET */}
+                  <div
+                    id={`ticket-${first.booking_id}`}
+                    className="bg-white w-[350px] p-5 rounded-xl border shadow relative mx-auto"
+                  >
+                    <h2 className="text-lg font-bold">
+                      {first.movie || first.movie_name || first.workspace || "Movie"}
+                    </h2>
 
-                  {booking.qr_code_url && (
-                    <div className="mt-6 rounded-3xl border border-blue-200 bg-blue-50 p-4">
-                      <p className="text-sm font-semibold text-blue-900">Ticket QR Code</p>
+                    <p className="text-sm text-gray-500">
+                      {first.language} • {first.screen}
+                    </p>
+
+                    <p className="text-sm mt-2">
+                      {first.start_time} - {first.end_time}
+                    </p>
+
+                    <p className="mt-2">
+                      Seats: {group.map((b) => b.seat).join(", ")}
+                    </p>
+
+                    <p className="font-semibold">
+                      ₹{group.reduce((s, b) => s + (b.price || 0), 0)}
+                    </p>
+
+                    {/* 🎬 CUT DESIGN */}
+                    <div className="absolute left-0 top-1/2 w-4 h-4 bg-gray-100 rounded-full -translate-x-1/2"></div>
+                    <div className="absolute right-0 top-1/2 w-4 h-4 bg-gray-100 rounded-full translate-x-1/2"></div>
+
+                    {/* QR FIX */}
+                    {first.qr_code_url && (
                       <img
-                        src={`http://127.0.0.1:8000${booking.qr_code_url}`}
-                        alt="Booking QR"
-                        className="mt-3 h-32 w-32 rounded-lg border border-blue-200"
+                        src={`http://127.0.0.1:8000${first.qr_code_url}`}
+                        crossOrigin="anonymous"
+                        className="mt-4 w-24 mx-auto"
+                        onError={(e) => {
+                          console.error("QR image failed to load");
+                          e.target.style.display = "none";
+                        }}
                       />
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  {booking.status?.toLowerCase() === "pending" && (
-                    <div className="mt-6 flex justify-end">
-                      <button
-                        onClick={() => navigate("/payment", {
-                          state: {
-                            bookingDetails: [
-                              {
-                                booking_id: booking.booking_id,
-                                seat_label: booking.seat || "Seat",
-                                price: booking.price || 0,
-                              },
-                            ],
-                            slot: {
-                              start_time: booking.start_time,
-                              end_time: booking.end_time,
-                            },
-                            screen: { name: booking.screen },
-                            totalPrice: booking.price || 0,
-                            bookingDate: booking.date,
-                          },
-                        })}
-                        className="rounded-full bg-emerald-600 px-6 py-3 text-sm font-semibold text-white hover:bg-emerald-500"
-                      >
-                        Pay now
-                      </button>
-                    </div>
-                  )}
+                  {/* 🎯 BUTTONS */}
+                  <div className="flex gap-3 mt-6 justify-center flex-wrap">
+
+                    <button
+                      onClick={() => downloadPDF(group)}
+                      disabled={downloadingId === first.booking_id}
+                      className="bg-green-500 hover:bg-green-600 disabled:bg-green-300 text-white px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2"
+                    >
+                      {downloadingId === first.booking_id ? (
+                        <>
+                          <span className="animate-spin">⏳</span> Downloading...
+                        </>
+                      ) : (
+                        <>📥 Download Ticket</>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => cancelBooking(group)}
+                      disabled={cancellingId === first.booking_id}
+                      className="bg-red-500 hover:bg-red-600 disabled:bg-red-300 text-white px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2"
+                    >
+                      {cancellingId === first.booking_id ? (
+                        <>
+                          <span className="animate-spin">⏳</span> Cancelling...
+                        </>
+                      ) : (
+                        <>✕ Cancel Booking</>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={() => shareTicket(group)}
+                      className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2"
+                    >
+                      📤 Share Ticket
+                    </button>
+
+                  </div>
+
                 </div>
               );
             })}

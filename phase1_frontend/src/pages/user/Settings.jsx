@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
+import axios from "axios";
 
 const Settings = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [settings, setSettings] = useState({
     notifications: true,
     emailUpdates: true,
@@ -13,6 +14,34 @@ const Settings = () => {
     twoFactor: false,
   });
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+
+  useEffect(() => {
+    // Load settings from localStorage on mount
+    const savedSettings = localStorage.getItem("userSettings");
+    if (savedSettings) {
+      setSettings(JSON.parse(savedSettings));
+    }
+    // Apply theme from localStorage
+    const theme = localStorage.getItem("theme") || "light";
+    applyTheme(theme);
+  }, []);
+
+  const applyTheme = (theme) => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  };
 
   const handleSettingChange = (key, value) => {
     setSettings((prev) => ({
@@ -20,11 +49,85 @@ const Settings = () => {
       [key]: value,
     }));
     setSaved(false);
+    setError("");
   };
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      // Save to localStorage
+      localStorage.setItem("userSettings", JSON.stringify(settings));
+      
+      // Apply theme immediately
+      applyTheme(settings.theme);
+
+      // Try to save to backend if user exists
+      if (user?.id) {
+        await axios.post("/api/user/settings", settings);
+      }
+
+      setSaved(true);
+      setError("");
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError("Failed to save settings. Changes saved locally.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!passwordData.newPassword) {
+      setError("Please enter a new password");
+      return;
+    }
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+    if (passwordData.newPassword.length < 6) {
+      setError("Password must be at least 6 characters");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await axios.post("/api/auth/change-password", {
+        current_password: passwordData.currentPassword,
+        new_password: passwordData.newPassword,
+      });
+      setError("");
+      alert("Password changed successfully!");
+      setShowPasswordModal(false);
+      setPasswordData({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+    } catch (err) {
+      setError(err.response?.data?.detail || "Failed to change password");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setLoading(true);
+    try {
+      await axios.delete("/api/user/account");
+      alert("Account deleted successfully");
+      logout();
+      navigate("/login");
+    } catch (err) {
+      setError(err.response?.data?.detail || "Failed to delete account");
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
   };
 
   return (
@@ -146,7 +249,10 @@ const Settings = () => {
               </div>
 
               <div className="border-t border-slate-200 pt-4">
-                <button className="rounded-3xl bg-slate-100 px-6 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-200 transition">
+                <button 
+                  onClick={() => setShowPasswordModal(true)}
+                  className="rounded-3xl bg-slate-100 px-6 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-200 transition"
+                >
                   Change Password
                 </button>
               </div>
@@ -157,9 +263,10 @@ const Settings = () => {
           <div className="flex gap-3">
             <button
               onClick={handleSave}
-              className="rounded-3xl bg-emerald-600 px-8 py-3 text-base font-semibold text-white hover:bg-emerald-500 transition"
+              disabled={loading}
+              className="rounded-3xl bg-emerald-600 px-8 py-3 text-base font-semibold text-white hover:bg-emerald-500 transition disabled:opacity-50"
             >
-              Save Settings
+              {loading ? "Saving..." : "Save Settings"}
             </button>
             <button
               onClick={() => navigate(-1)}
@@ -168,7 +275,126 @@ const Settings = () => {
               Cancel
             </button>
           </div>
+
+          {/* Account Actions */}
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm mt-8">
+            <h2 className="text-2xl font-semibold text-slate-950 mb-6">Account</h2>
+            <div className="space-y-3">
+              <button
+                onClick={() => setShowDeleteModal(true)}
+                className="w-full rounded-3xl bg-rose-50 px-6 py-3 text-sm font-semibold text-rose-600 hover:bg-rose-100 transition"
+              >
+                Delete Account
+              </button>
+              <button
+                onClick={handleLogout}
+                className="w-full rounded-3xl bg-red-50 px-6 py-3 text-sm font-semibold text-red-600 hover:bg-red-100 transition"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
         </div>
+
+        {/* Change Password Modal */}
+        {showPasswordModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50">
+            <div className="rounded-3xl bg-white p-8 shadow-xl max-w-md w-full mx-4">
+              <h3 className="text-2xl font-semibold text-slate-950 mb-4">Change Password</h3>
+              
+              {error && (
+                <div className="mb-4 rounded-3xl bg-rose-50 p-3 text-rose-600 text-sm border border-rose-200">
+                  {error}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-900 mb-2">Current Password</label>
+                  <input
+                    type="password"
+                    value={passwordData.currentPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+                    className="w-full rounded-3xl border border-slate-300 px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    placeholder="Enter current password"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-900 mb-2">New Password</label>
+                  <input
+                    type="password"
+                    value={passwordData.newPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                    className="w-full rounded-3xl border border-slate-300 px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    placeholder="Enter new password"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-slate-900 mb-2">Confirm Password</label>
+                  <input
+                    type="password"
+                    value={passwordData.confirmPassword}
+                    onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                    className="w-full rounded-3xl border border-slate-300 px-4 py-3 text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                    placeholder="Confirm password"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 flex gap-3">
+                <button
+                  onClick={handleChangePassword}
+                  disabled={loading}
+                  className="flex-1 rounded-3xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 transition disabled:opacity-50"
+                >
+                  {loading ? "Updating..." : "Update Password"}
+                </button>
+                <button
+                  onClick={() => setShowPasswordModal(false)}
+                  className="flex-1 rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Account Confirmation Modal */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50">
+            <div className="rounded-3xl bg-white p-8 shadow-xl max-w-md w-full mx-4">
+              <h3 className="text-2xl font-semibold text-rose-600 mb-3">Delete Account</h3>
+              <p className="text-slate-600 mb-4">
+                Are you sure you want to delete your account? This action cannot be undone. All your bookings and data will be permanently deleted.
+              </p>
+
+              {error && (
+                <div className="mb-4 rounded-3xl bg-rose-50 p-3 text-rose-600 text-sm border border-rose-200">
+                  {error}
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={loading}
+                  className="flex-1 rounded-3xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-500 transition disabled:opacity-50"
+                >
+                  {loading ? "Deleting..." : "Delete Account"}
+                </button>
+                <button
+                  onClick={() => setShowDeleteModal(false)}
+                  className="flex-1 rounded-3xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
