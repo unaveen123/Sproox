@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app import models
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 
 router = APIRouter(prefix="/user", tags=["Reservation"])
 
@@ -38,7 +38,7 @@ def reserve_seat(seat_id: str,
     if seat.status == "reserved" and seat.reserved_until:
 
         # reservation still active
-        if seat.reserved_until > datetime.utcnow():
+        if seat.reserved_until > datetime.now(timezone.utc):
 
             # allow same user to continue
             if seat.reserved_by != current_user.id:
@@ -48,7 +48,7 @@ def reserve_seat(seat_id: str,
                 )
 
     # 5️⃣ Reserve seat (REAL LOCK)
-    expiry_time = datetime.utcnow() + timedelta(minutes=5)
+    expiry_time = datetime.now(timezone.utc) + timedelta(minutes=5)
 
     seat.status = "reserved"
     seat.reserved_by = current_user.id

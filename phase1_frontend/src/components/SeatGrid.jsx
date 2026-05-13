@@ -40,7 +40,7 @@ const SeatGrid = ({ seats, selectedSeats, onToggleSeat }) => {
           <span className="h-3 w-3 rounded-full bg-slate-500" /> Available
         </div>
         <div className="flex items-center gap-2 rounded-3xl bg-slate-50 px-4 py-3">
-          <span className="h-3 w-3 rounded-full bg-amber-500" /> Selected
+          <span className="h-3 w-3 rounded-full bg-red-500" /> Selected
         </div>
         <div className="flex items-center gap-2 rounded-3xl bg-slate-50 px-4 py-3">
           <span className="h-3 w-3 rounded-full bg-slate-300" /> Booked
@@ -95,7 +95,7 @@ const SeatGrid = ({ seats, selectedSeats, onToggleSeat }) => {
                                   isBooked
                                     ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
                                     : isSelected
-                                    ? "border-amber-500 bg-amber-500 text-white shadow"
+                                    ? "border-red-500 bg-red-500 text-white shadow"
                                     : "border-slate-300 bg-white text-slate-900 hover:border-slate-900 hover:bg-slate-50"
                                 }`}
                               >
@@ -111,6 +111,16 @@ const SeatGrid = ({ seats, selectedSeats, onToggleSeat }) => {
           </div>
         );
       })}
+
+      <div className="mt-10 flex flex-col items-center gap-3 border-t border-slate-200 pt-8">
+        <div className="relative h-16 w-full max-w-xl">
+          <div className="absolute inset-x-6 top-0 h-10 rounded-t-[2rem] border border-sky-200 bg-sky-100 shadow-[0_10px_24px_rgba(14,165,233,0.18)]" />
+          <div className="absolute inset-x-0 bottom-0 h-8 border border-sky-100 bg-sky-50 [clip-path:polygon(8%_0,92%_0,100%_100%,0_100%)]" />
+        </div>
+        <p className="text-sm font-semibold text-slate-600">
+          All eyes this way please
+        </p>
+      </div>
     </div>
   );
 };

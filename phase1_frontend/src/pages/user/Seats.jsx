@@ -4,6 +4,38 @@ import api from "../../services/api";
 import LoadingSpinner from "../../components/LoadingSpinner.jsx";
 import SeatGrid from "../../components/SeatGrid.jsx";
 
+const API_BASE_URL = api.defaults.baseURL || "http://127.0.0.1:8000";
+
+const normalizeImageUrl = (value) => {
+  const rawUrl =
+    typeof value === "string"
+      ? value
+      : value?.image_url || value?.url || value?.poster_url || value?.src;
+
+  if (!rawUrl) return null;
+  if (/^https?:\/\//i.test(rawUrl)) return rawUrl;
+
+  const cleanedPath = rawUrl.replace(/\\/g, "/").replace(/^\/+/, "");
+  return `${API_BASE_URL}/${cleanedPath}`;
+};
+
+const getPosterUrl = (slot, location) => {
+  const posterCandidates = [
+    slot?.poster_url,
+    slot?.image_url,
+    slot?.poster,
+    slot?.thumbnail,
+    Array.isArray(slot?.images) ? slot.images[0] : slot?.images,
+    Array.isArray(slot?.movie_images) ? slot.movie_images[0] : slot?.movie_images,
+    location?.poster_url,
+    location?.image_url,
+    location?.poster,
+    Array.isArray(location?.images) ? location.images[0] : location?.images,
+  ];
+
+  return posterCandidates.map(normalizeImageUrl).find(Boolean);
+};
+
 const Seats = () => {
   const { id: locationId } = useParams();
   const { state } = useLocation();
@@ -13,20 +45,26 @@ const Seats = () => {
   const slot = state?.slot;
   const selectedLocation = state?.location;
 
-  // ✅ FIXED MOVIE DATA (IMPORTANT)
   const movieName = slot?.movie_name || "Movie";
   const language = slot?.language || "";
+  const bookingDate =
+    state?.bookingDate ||
+    slot?.date ||
+    slot?.booking_date ||
+    slot?.show_date ||
+    slot?.bookingDate ||
+    new Date().toISOString().split("T")[0];
+  const posterUrl = getPosterUrl(slot, selectedLocation);
 
   const [seats, setSeats] = useState([]);
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // ================= FETCH SEATS =================
   useEffect(() => {
     const fetchSeats = async () => {
       try {
-        const bookingDate = new Date().toISOString().split("T")[0];
-
         const res = await api.get(
           `/user/locations/${locationId}/theater-seats`,
           {
@@ -50,8 +88,9 @@ const Seats = () => {
     };
 
     fetchSeats();
-  }, [locationId, slot]);
+  }, [locationId, slot, bookingDate]);
 
+  // ================= COUNTS =================
   const selectedSeatIds = useMemo(
     () => selectedSeats.map((seat) => seat.seat_id || seat.id),
     [selectedSeats]
@@ -92,6 +131,7 @@ const Seats = () => {
     [selectedSeats]
   );
 
+  // ================= TOGGLE SEAT =================
   const toggleSeat = (seat) => {
     const booked =
       seat.is_booked ||
@@ -120,6 +160,12 @@ const Seats = () => {
     }
   };
 
+  // ================= BACK =================
+  const handleBack = () => {
+    navigate(-1);
+  };
+
+  // ================= CONTINUE =================
   const handleContinue = () => {
     if (selectedSeats.length === 0) {
       setError("Select at least one seat to continue.");
@@ -131,59 +177,78 @@ const Seats = () => {
         location: selectedLocation,
         screen,
         slot,
-        selectedSeats,
+        bookingDetails: selectedSeats, // ✅ IMPORTANT
         totalPrice,
+        bookingDate, // ✅ IMPORTANT
       },
     });
   };
 
+  // ================= UI =================
   return (
     <div className="min-h-screen bg-slate-100 py-10">
       <div className="mx-auto max-w-7xl px-4 sm:px-6">
-        
-        {/* 🔥 HEADER FIXED */}
-        <div className="mb-8 rounded-[2rem] bg-white p-8 shadow-lg">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-sm uppercase tracking-[0.3em] text-slate-500">
-                Seat Selection
-              </p>
 
-              {/* 🎬 MOVIE NAME */}
-              <h1 className="mt-3 text-4xl font-semibold text-slate-950">
-                {movieName}
-              </h1>
-
-              {/* 🌐 LANGUAGE */}
-              {language && (
-                <p className="mt-2 text-sm text-slate-500">
-                  Language: {language}
-                </p>
-              )}
-
-              {/* 🎥 SCREEN + TIME */}
-              <p className="mt-2 text-slate-600">
-                {screen?.name || "Screen"} •{" "}
-                {slot?.start_time} - {slot?.end_time}
-              </p>
-
-              {/* 🏢 THEATER NAME (OPTIONAL) */}
-              {selectedLocation?.name && (
-                <p className="mt-1 text-sm text-gray-400">
-                  {selectedLocation.name}
-                </p>
+        {/* HEADER */}
+        <div className="mb-8 overflow-hidden rounded-4xl bg-white shadow-xl">
+          <div className="grid gap-6 p-8 md:grid-cols-[180px_1fr_auto] md:items-center">
+            <div className="col-span-full flex items-center justify-between">
+              <button
+                onClick={handleBack}
+                className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                ← Back
+              </button>
+            </div>
+            <div className="mx-auto flex h-64 w-44 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 md:mx-0">
+              {posterUrl ? (
+                <img
+                  src={posterUrl}
+                  alt={movieName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-linear-to-br from-slate-900 via-red-950 to-slate-800 text-5xl font-black text-white">
+                  {movieName.slice(0, 1)}
+                </div>
               )}
             </div>
 
-            <button
-              onClick={() => navigate(-1)}
-              className="rounded-full border border-slate-300 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-100"
-            >
-              Back to screenings
-            </button>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.4em] text-red-500">
+                Select Seats
+              </p>
+              <h1 className="mt-3 text-5xl font-black text-slate-950">
+                {movieName}
+              </h1>
+
+              <div className="mt-5 flex flex-wrap gap-3 text-sm font-semibold">
+                {language && (
+                  <span className="rounded-full border border-slate-200 px-4 py-2 text-slate-700">
+                    {language}
+                  </span>
+                )}
+                <span className="rounded-full border border-slate-200 px-4 py-2 text-slate-700">
+                  {screen?.name || "Screen"}
+                </span>
+                <span className="rounded-full border border-slate-200 px-4 py-2 text-slate-700">
+                  {slot?.start_time} - {slot?.end_time}
+                </span>
+                <span className="rounded-full border border-slate-200 px-4 py-2 text-slate-700">
+                  {bookingDate}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-slate-950 p-5 text-white">
+              <p className="text-sm text-slate-300">Selected</p>
+              <p className="mt-2 text-4xl font-black">{selectedSeatIds.length}</p>
+              <p className="mt-2 text-sm text-slate-300">₹{totalPrice}</p>
+            </div>
           </div>
         </div>
 
+        {/* LOADING / ERROR */}
         {loading ? (
           <LoadingSpinner message="Loading seats..." />
         ) : error ? (
@@ -192,32 +257,24 @@ const Seats = () => {
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm font-medium text-slate-500">
-                Screen Layout
-              </p>
-              <p className="mt-2 text-sm text-slate-600">
-                Select your seats, then continue to the next page.
-              </p>
-              <div className="mt-4 h-3 rounded-full bg-slate-300"></div>
-            </div>
 
+            {/* STATS */}
             <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-3xl border bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <p className="text-xs uppercase text-slate-500">Available</p>
                 <p className="mt-3 text-3xl font-semibold">
                   {availableSeatsCount}
                 </p>
               </div>
 
-              <div className="rounded-3xl border bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-red-100 bg-white p-5 shadow-sm">
                 <p className="text-xs uppercase text-slate-500">Selected</p>
-                <p className="mt-3 text-3xl font-semibold text-amber-600">
+                <p className="mt-3 text-3xl font-semibold text-red-500">
                   {selectedSeatIds.length}
                 </p>
               </div>
 
-              <div className="rounded-3xl border bg-white p-5 shadow-sm">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <p className="text-xs uppercase text-slate-500">Booked</p>
                 <p className="mt-3 text-3xl font-semibold text-gray-400">
                   {bookedSeatsCount}
@@ -225,17 +282,19 @@ const Seats = () => {
               </div>
             </div>
 
+            {/* SEAT GRID */}
             <SeatGrid
               seats={seats}
               selectedSeats={selectedSeats}
               onToggleSeat={toggleSeat}
             />
 
+            {/* BUTTON */}
             <button
               onClick={handleContinue}
-              className="w-full rounded-3xl bg-emerald-600 px-6 py-4 text-white"
+              className="w-full rounded-xl bg-linear-to-r from-red-500 to-pink-600 px-6 py-4 font-bold text-white transition hover:from-red-600 hover:to-pink-700"
             >
-              Continue to booking
+              Continue to Confirm & Pay
             </button>
           </div>
         )}

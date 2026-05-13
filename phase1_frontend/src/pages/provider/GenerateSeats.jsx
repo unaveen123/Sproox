@@ -1,10 +1,12 @@
-import { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate, useLocation } from "react-router-dom";
 
-export default function GenerateSeats() {
+const GenerateSeats = () => {
   const navigate = useNavigate();
-  const locationState = useLocation();
+  const location = useLocation();
+
+  const BASE_URL = "http://127.0.0.1:8000";
 
   const [locations, setLocations] = useState([]);
   const [screens, setScreens] = useState([]);
@@ -13,78 +15,70 @@ export default function GenerateSeats() {
   const [selectedLocation, setSelectedLocation] = useState("");
   const [selectedScreen, setSelectedScreen] = useState("");
 
-  const [rowsData, setRowsData] = useState([
-    { row: "", seats: "", category: "" }
+  const [rows, setRows] = useState([
+    { row: "A", seats: "", category: "" },
   ]);
 
-  const BASE_URL = "http://127.0.0.1:8000";
+  const [message, setMessage] = useState("");
 
-  const getToken = () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      alert("Session expired. Please login again");
-      window.location.href = "/login";
-      throw new Error("No token");
-    }
-    return token;
-  };
-
-  // ✅ PREFILL
+  // ================= LOAD FROM PREVIOUS PAGE =================
   useEffect(() => {
-    if (locationState.state) {
-      setSelectedLocation(locationState.state.locationId || "");
-      setSelectedScreen(locationState.state.screenId || "");
+    if (location.state) {
+      setSelectedLocation(location.state.locationId || "");
+      setSelectedScreen(location.state.screenId || "");
     }
-  }, [locationState.state]);
+  }, []);
 
-  // ✅ FETCH LOCATIONS
+  // ================= FETCH LOCATIONS =================
   useEffect(() => {
     const fetchLocations = async () => {
       try {
         const res = await axios.get(
           `${BASE_URL}/provider/location/my-locations`,
           {
-            headers: { Authorization: `Bearer ${getToken()}` },
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
           }
         );
+
         setLocations(res.data || []);
-      } catch (err) {
-        console.error("LOCATION ERROR:", err);
+      } catch {
+        setLocations([]);
       }
     };
+
     fetchLocations();
   }, []);
 
-  // ✅ FETCH SCREENS
+  // ================= FETCH SCREENS =================
   useEffect(() => {
-    if (!selectedLocation) {
-      setScreens([]);
-      return;
-    }
+    if (!selectedLocation) return;
 
     const fetchScreens = async () => {
       try {
         const res = await axios.get(
           `${BASE_URL}/provider/location/${selectedLocation}/screens`,
           {
-            headers: { Authorization: `Bearer ${getToken()}` },
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
           }
         );
+
+        console.log("Screens:", res.data);
         setScreens(res.data || []);
-      } catch (err) {
-        console.error("SCREEN ERROR:", err);
+      } catch {
+        setScreens([]);
       }
     };
 
     fetchScreens();
   }, [selectedLocation]);
 
-  // ✅ FETCH CATEGORIES
+  // ================= FETCH CATEGORIES =================
   useEffect(() => {
-    if (!selectedLocation || !selectedScreen) {
-      setCategories([]);
-      return;
-    }
+    if (!selectedLocation || !selectedScreen) return;
 
     const fetchCategories = async () => {
       try {
@@ -92,221 +86,252 @@ export default function GenerateSeats() {
           `${BASE_URL}/theater/provider/location/${selectedLocation}/seat-categories`,
           {
             params: { screen_id: selectedScreen },
-            headers: { Authorization: `Bearer ${getToken()}` },
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
           }
         );
 
-        const data = Array.isArray(res.data) ? res.data : [];
-        const unique = [...new Map(data.map(c => [c.name, c])).values()];
-
-        setCategories(unique);
-
-      } catch (err) {
-        console.error("CATEGORY ERROR:", err);
+        console.log("Categories:", res.data);
+        setCategories(res.data || []);
+      } catch {
+        setCategories([]);
       }
     };
 
     fetchCategories();
   }, [selectedLocation, selectedScreen]);
 
+  // ================= HANDLE ROW =================
+  const handleChange = (index, field, value) => {
+    const updated = [...rows];
+    updated[index][field] = value;
+    setRows(updated);
+  };
+
   const addRow = () => {
-    setRowsData([...rowsData, { row: "", seats: "", category: "" }]);
+    const nextLetter = String.fromCharCode(65 + rows.length);
+    setRows([...rows, { row: nextLetter, seats: "", category: "" }]);
   };
 
   const removeRow = (index) => {
-    const updated = [...rowsData];
+    const updated = [...rows];
     updated.splice(index, 1);
-    setRowsData(updated);
+    setRows(updated);
   };
 
-  // ✅ DUPLICATE ROW BLOCK
-  const handleChange = (index, field, value) => {
-    const updated = [...rowsData];
-
-    if (field === "row") {
-      const rowValue = value.toUpperCase();
-
-      const isDuplicate = updated.some(
-        (r, i) => i !== index && r.row.toUpperCase() === rowValue
-      );
-
-      if (isDuplicate) {
-        alert(`❌ Row '${rowValue}' already exists`);
-        return;
-      }
+  // ================= SUBMIT =================
+  const handleSubmit = async () => {
+    if (!selectedLocation || !selectedScreen) {
+      setMessage("⚠️ Select location and screen");
+      return;
     }
 
-    updated[index][field] = value;
-    setRowsData(updated);
-  };
+    const invalidRow = rows.find(
+      (row) => !row.seats || isNaN(Number(row.seats)) || Number(row.seats) <= 0
+    );
+    const invalidCategory = rows.find((row) => !row.category);
 
-  // ✅ FINAL SUBMIT (100% MATCH BACKEND)
-  const handleSubmit = async () => {
+    if (invalidRow) {
+      setMessage("⚠️ Please enter a valid seat count for every row.");
+      return;
+    }
+
+    if (invalidCategory) {
+      setMessage("⚠️ Please select a category for every row.");
+      return;
+    }
+
+    const payload = {
+      rows: rows.reduce((acc, row) => {
+        acc[row.row] = Number(row.seats);
+        return acc;
+      }, {}),
+      category_mapping: rows.reduce((acc, row) => {
+        acc[row.row] = row.category;
+        return acc;
+      }, {}),
+    };
+
     try {
-      let rows = {};
-      let category_mapping = {};
-      let rowSet = new Set();
-
-      for (let r of rowsData) {
-        if (!r.row || !r.seats || !r.category) {
-          alert("❌ Fill all fields");
-          return;
-        }
-
-        const rowKey = r.row.toUpperCase();
-
-        if (rowSet.has(rowKey)) {
-          alert(`❌ Row '${rowKey}' already added`);
-          return;
-        }
-
-        rowSet.add(rowKey);
-
-        // 🔥 EXACT FORMAT REQUIRED
-        rows[rowKey] = Number(r.seats);
-        category_mapping[rowKey] = r.category;
-      }
-
-      const payload = {
-        rows,
-        category_mapping
-      };
-
-      console.log("🚀 FINAL PAYLOAD:", payload);
-
       await axios.post(
         `${BASE_URL}/theater/provider/location/${selectedLocation}/generate-seats`,
         payload,
         {
           params: { screen_id: selectedScreen },
-          headers: { Authorization: `Bearer ${getToken()}` },
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
         }
       );
 
-      alert("✅ Seats Generated Successfully");
-
+      setMessage("✅ Seats generated successfully");
     } catch (err) {
-      console.error("❌ ERROR:", err.response?.data || err);
-
-      alert(
-        err.response?.data?.detail
-          ? JSON.stringify(err.response.data.detail)
-          : "Error generating seats"
-      );
+      console.log(err.response?.data);
+      setMessage(err.response?.data?.detail || "❌ Error generating seats");
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 to-black text-white flex items-center justify-center">
-      <div className="bg-purple-900/40 p-8 rounded-xl w-full max-w-lg">
+  // ================= AUTO HIDE =================
+  useEffect(() => {
+    if (message) {
+      const timer = setTimeout(() => setMessage(""), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [message]);
 
-        <button onClick={() => navigate("/seat-categories")} className="mb-4">
-          ← Back
+  return (
+    <div className="min-h-screen bg-gray-100 p-6">
+
+      {/* TOAST */}
+      {message && (
+        <div className="fixed top-5 right-5 px-4 py-3 rounded shadow-lg text-white bg-green-500">
+          {message}
+        </div>
+      )}
+
+      <div className="max-w-3xl mx-auto">
+
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-4 px-5 py-2 bg-gray-100 rounded-xl"
+        >
+          Back
         </button>
 
-        <h1 className="text-2xl mb-6 text-center">🎬 Generate Seats</h1>
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
 
-        {/* LOCATION */}
-        <select
-          value={selectedLocation}
-          onChange={(e) => setSelectedLocation(e.target.value)}
-          className="w-full mb-4 p-3 rounded bg-purple-700"
-        >
-          <option value="">Select Location</option>
-          {locations.map((loc) => {
-            const locId = loc.id || loc.uuid || loc.location_id;
-            return (
-              <option key={locId} value={locId}>
-                {loc.name || loc.location_name}
-              </option>
-            );
-          })}
-        </select>
+          <div className="bg-gradient-to-r from-purple-600 to-pink-500 p-6 text-white">
+            <h2 className="text-2xl font-bold">Generate Seats</h2>
+          </div>
 
-        {/* SCREEN */}
-        <select
-          value={selectedScreen}
-          onChange={(e) => setSelectedScreen(e.target.value)}
-          className="w-full mb-4 p-3 rounded bg-purple-700"
-        >
-          <option value="">Select Screen</option>
-          {screens.map((scr) => (
-            <option key={scr.id} value={scr.id}>
-              {scr.name || scr.screen_number}
-            </option>
-          ))}
-        </select>
+          <div className="p-6">
 
-        {/* ROWS */}
-        {rowsData.map((r, index) => (
-          <div key={index} className="flex gap-2 mb-3">
-            <input
-              type="text"
-              placeholder="Row"
-              className="w-1/3 p-2 rounded bg-purple-700"
-              value={r.row}
-              onChange={(e) =>
-                handleChange(index, "row", e.target.value)
-              }
-            />
-
-            <input
-              type="number"
-              placeholder="Seats"
-              className="w-1/3 p-2 rounded bg-purple-700"
-              value={r.seats}
-              onChange={(e) =>
-                handleChange(index, "seats", e.target.value)
-              }
-            />
-
+            {/* LOCATION */}
             <select
-              className="w-1/3 p-2 rounded bg-purple-700"
-              value={r.category}
-              onChange={(e) =>
-                handleChange(index, "category", e.target.value)
-              }
+              value={selectedLocation}
+              onChange={(e) => setSelectedLocation(e.target.value)}
+              className="w-full mb-4 p-3 rounded-lg border"
             >
-              <option value="">Select Category</option>
+              <option value="">Select Location</option>
 
-              {categories.map((cat) => (
-                <option key={cat.id || cat.name} value={cat.name}>
-                  {cat.name}
-                </option>
-              ))}
+              {locations.map((loc) => {
+                const id = loc.id || loc.location_id;
+                const name = loc.name || loc.location_name;
+
+                return (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                );
+              })}
             </select>
 
-            <button
-              onClick={() => removeRow(index)}
-              className="bg-red-500 px-2 rounded"
+            {/* SCREEN */}
+            <select
+              value={selectedScreen}
+              onChange={(e) => setSelectedScreen(e.target.value)}
+              className="w-full mb-4 p-3 rounded-lg border"
             >
-              X
+              <option value="">
+                {screens.length === 0
+                  ? "No Screens Available"
+                  : "Select Screen"}
+              </option>
+
+              {screens.map((scr) => {
+                const id = scr.id || scr.screen_id;
+                const name = scr.name || scr.screen_name;
+
+                return (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                );
+              })}
+            </select>
+
+            {/* ROWS */}
+            {rows.map((r, index) => (
+              <div key={index} className="flex gap-2 mb-3">
+
+                <input
+                  value={r.row}
+                  disabled
+                  className="w-1/4 p-3 border rounded"
+                />
+
+                <input
+                  placeholder="Seats"
+                  value={r.seats}
+                  onChange={(e) =>
+                    handleChange(index, "seats", e.target.value)
+                  }
+                  className="w-1/4 p-3 border rounded"
+                />
+
+                <select
+                  value={r.category}
+                  onChange={(e) =>
+                    handleChange(index, "category", e.target.value)
+                  }
+                  className="w-1/2 p-3 border rounded"
+                >
+                  <option>Select Category</option>
+
+                  {categories.map((c) => {
+                    const name = c.name || c.category_name;
+
+                    return (
+                      <option key={c.id} value={name}>
+                        {name}
+                      </option>
+                    );
+                  })}
+                </select>
+
+                <button
+                  onClick={() => removeRow(index)}
+                  className="bg-red-500 px-3 text-white rounded"
+                >
+                  X
+                </button>
+              </div>
+            ))}
+
+            <button
+              onClick={addRow}
+              className="w-full py-3 mb-3 text-white bg-gradient-to-r from-purple-600 to-pink-500 rounded"
+            >
+              + Add Row
             </button>
+
+            <button
+              onClick={handleSubmit}
+              className="w-full py-3 mb-3 text-white bg-gradient-to-r from-purple-600 to-pink-500 rounded"
+            >
+              Generate Seats
+            </button>
+
+            <button
+              onClick={() =>
+                navigate("/add-timeslot", {
+                  state: {
+                    locationId: selectedLocation,
+                    screenId: selectedScreen,
+                  },
+                })
+              }
+              className="w-full py-3 border rounded"
+            >
+              Next →
+            </button>
+
           </div>
-        ))}
-
-        <button
-          onClick={addRow}
-          className="w-full py-2 mb-3 bg-purple-500 rounded"
-        >
-          + Add Row
-        </button>
-
-        <button
-          onClick={handleSubmit}
-          className="w-full py-3 mb-3 bg-purple-400 rounded"
-        >
-          Generate Seats
-        </button>
-
-        <button
-          onClick={() => navigate("/add-timeslot")}
-          className="w-full py-3 bg-green-500 rounded"
-        >
-          Next →
-        </button>
-
+        </div>
       </div>
     </div>
   );
-}
+};
+
+export default GenerateSeats;

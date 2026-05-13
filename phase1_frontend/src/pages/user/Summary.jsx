@@ -1,175 +1,336 @@
-import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import api from "../../services/api";
-import BookingSummary from "../../components/BookingSummary.jsx";
+
+const API_BASE_URL = api.defaults.baseURL || "http://127.0.0.1:8000";
+
+const normalizeImageUrl = (value) => {
+  const rawUrl =
+    typeof value === "string"
+      ? value
+      : value?.image_url || value?.url || value?.poster_url || value?.src;
+
+  if (!rawUrl) return null;
+  if (/^https?:\/\//i.test(rawUrl)) return rawUrl;
+
+  const cleanedPath = rawUrl.replace(/\\/g, "/").replace(/^\/+/, "");
+  return `${API_BASE_URL}/${cleanedPath}`;
+};
+
+const getPosterUrl = (slot, location) => {
+  const posterCandidates = [
+    slot?.poster_url,
+    slot?.image_url,
+    slot?.poster,
+    slot?.thumbnail,
+    Array.isArray(slot?.images) ? slot.images[0] : slot?.images,
+    Array.isArray(slot?.movie_images) ? slot.movie_images[0] : slot?.movie_images,
+    location?.poster_url,
+    location?.image_url,
+    location?.poster,
+    Array.isArray(location?.images) ? location.images[0] : location?.images,
+  ];
+
+  return posterCandidates.map(normalizeImageUrl).find(Boolean);
+};
+
+const getSeatId = (seat) => seat.theater_seat_id || seat.seat_id || seat.id;
+const getSeatLabel = (seat) => seat.seat_label || seat.seat_number || seat.label;
 
 const Summary = () => {
   const { state } = useLocation();
   const navigate = useNavigate();
 
   const {
-    location,
-    screen,
+    bookingDetails = [],
+    totalPrice = 0,
     slot,
-    selectedSeats,
-    totalPrice
+    screen,
+    bookingDate,
+    location,
   } = state || {};
 
-  const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("success");
+  const posterUrl = getPosterUrl(slot, location);
+  const razorpayKey =
+    import.meta.env.VITE_RAZORPAY_KEY_ID ||
+    import.meta.env.VITE_RAZORPAY_KEY ||
+    "";
 
-  // ✅ FIXED DATA
-  const movieName = slot?.movie_name || "Movie";
-  const language = slot?.language || "";
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const cancelPendingBookings = async (bookingIds) => {
+    await Promise.allSettled(
+      bookingIds.map((bookingId) => api.patch(`/user/cancel-booking/${bookingId}`))
+    );
+  };
+
+  // 🔥 DEBUG (ADDED — DO NOT REMOVE)
+  useEffect(() => {
+    console.log("SUMMARY SLOT DATA:", slot);
+  }, [slot]);
 
   useEffect(() => {
-    if (!selectedSeats || selectedSeats.length === 0 || !slot) {
-      navigate("/movies", { replace: true });
+    if (!state || !slot) {
+      navigate("/movies");
     }
-  }, [navigate, selectedSeats, slot]);
+  }, [state, navigate, slot]);
 
-  const handleConfirm = async () => {
-    setProcessing(true);
-    setError(null);
+  const handlePayment = async () => {
+    const createdBookingIds = [];
 
     try {
-      const bookingDate = new Date().toISOString().split("T")[0];
-      const bookedSeats = [];
+      if (!bookingDetails || bookingDetails.length === 0) {
+        setMessage("⚠️ No seats selected");
+        setMessageType("error");
+        return;
+      }
 
-      for (const seat of selectedSeats) {
-        const res = await api.post("/user/book-seat", {
-          theater_seat_id: seat.seat_id || seat.id,
+      if (!razorpayKey) {
+        setMessage("❌ Razorpay key missing. Add VITE_RAZORPAY_KEY_ID in frontend .env");
+        setMessageType("error");
+        return;
+      }
+
+      setLoading(true);
+
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+        setMessage("❌ Unable to load Razorpay checkout");
+        setMessageType("error");
+        return;
+      }
+
+      for (const seat of bookingDetails) {
+        if (seat.booking_id) {
+          createdBookingIds.push(seat.booking_id);
+          continue;
+        }
+
+        const theaterSeatId = getSeatId(seat);
+        if (!theaterSeatId) {
+          throw new Error("Selected seat id missing");
+        }
+
+        const bookingRes = await api.post("/user/book-seat", {
+          theater_seat_id: theaterSeatId,
           slot_id: slot.slot_id,
           booking_date: bookingDate,
         });
 
-        bookedSeats.push({
-          booking_id: res.data.booking_id || res.data.id,
-          seat_label: seat.seat_number || seat.label || seat.name,
-          price: seat.price || seat.amount || 0,
-        });
+        createdBookingIds.push(bookingRes.data.booking_id);
       }
 
-      navigate("/payment", {
-        state: {
-          bookingDetails: bookedSeats,
-          totalPrice,
-          slot,
-          screen,
-          bookingDate,
-        },
+      const orderRes = await api.post("/payment/create-order", {
+        booking_ids: createdBookingIds,
       });
+
+      const { order_id, amount } = orderRes.data;
+
+      const options = {
+        key: razorpayKey,
+        amount: Number(amount) * 100,
+        currency: orderRes.data.currency || "INR",
+        name: slot?.movie_name || "Sproox",
+        description: `${slot?.language || "Movie"} - ${screen?.name || "Screen"}`,
+        image: posterUrl || undefined,
+        order_id: order_id,
+
+        handler: async function (response) {
+          try {
+            const verifyRes = await api.post("/payment/verify", {
+              order_id: response.razorpay_order_id,
+              payment_id: response.razorpay_payment_id,
+              signature: response.razorpay_signature,
+              booking_ids: createdBookingIds,
+            });
+
+            setMessage("✅ Payment Successful & Seats Booked!");
+            setMessageType("success");
+
+            navigate("/booking-success", {
+              state: {
+                booking: {
+                  total_price: totalPrice,
+                  date: bookingDate,
+                  ticket_ids: verifyRes.data.booking_ids || createdBookingIds,
+                },
+                qrTickets: verifyRes.data.qr_tickets || [],
+                seats: bookingDetails.map((seat) => ({
+                  seat_number: getSeatLabel(seat),
+                  price: seat.price || seat.amount || 0,
+                })),
+                slot,
+                screen,
+                location,
+                posterUrl,
+                successMessage: "✅ Payment Successful & Seats Booked!",
+              },
+            });
+
+          } catch (err) {
+            console.error("VERIFY ERROR:", err.response?.data);
+            setMessage("❌ Payment verification failed");
+            setMessageType("error");
+            setLoading(false);
+          }
+        },
+
+        modal: {
+          ondismiss: async function () {
+            await cancelPendingBookings(createdBookingIds);
+            setLoading(false);
+          },
+        },
+
+        theme: {
+          color: "#22c55e",
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+
     } catch (err) {
-      setError(
-        err.response?.data?.detail ||
-        err.message ||
-        "Booking failed. Please try again."
-      );
+      if (createdBookingIds.length > 0) {
+        await cancelPendingBookings(createdBookingIds);
+      }
+
+      console.error("PAYMENT ERROR:", err.response?.data || err);
+      setMessage(err.response?.data?.detail || err.message || "❌ Payment failed");
+      setMessageType("error");
+      setLoading(false);
     } finally {
-      setProcessing(false);
+      if (!window.Razorpay) {
+        setLoading(false);
+      }
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 py-10">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 px-4 py-12">
+      <div className="mx-auto max-w-4xl">
 
-        {/* 🔥 HEADER */}
-        <div className="mb-8 rounded-[2rem] bg-white p-8 shadow-lg">
-          <h1 className="text-4xl font-semibold text-slate-950">
-            Confirm Booking
-          </h1>
-          <p className="mt-3 text-slate-600">
-            Review your selected seats and complete booking.
-          </p>
-        </div>
+        <h1 className="text-4xl font-bold text-white mb-8 text-center">
+          🎬 Confirm & Pay
+        </h1>
 
-        <div className="grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
+        {message && (
+          <div className={`mb-6 rounded-3xl px-6 py-4 text-white ${
+            messageType === "success"
+              ? "bg-emerald-500"
+              : "bg-rose-500"
+          }`}>
+            {message}
+          </div>
+        )}
 
-          {/* LEFT SIDE */}
-          <div className="space-y-6">
+        <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
 
-            <div className="rounded-3xl border bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-slate-900">
-                Show details
+          <div className="grid md:grid-cols-2 gap-8 p-8">
+
+            {/* 🎬 POSTER SECTION */}
+            <div className="flex flex-col items-center">
+              {posterUrl ? (
+                <div className="flex h-80 w-full items-center justify-center overflow-hidden rounded-xl bg-gray-100">
+                  <img
+                    src={posterUrl}
+                    alt="poster"
+                    className="h-full w-full object-contain"
+                    onError={(e) => {
+                      e.target.src =
+                        "https://via.placeholder.com/400x300?text=No+Poster";
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="w-full h-80 bg-gradient-to-br from-purple-400 to-blue-600 flex items-center justify-center text-white text-xl rounded-xl">
+                  🎭 No Poster
+                </div>
+              )}
+              <p className="text-gray-500 mt-2 text-sm">Movie Poster</p>
+            </div>
+
+            {/* 📄 DETAILS */}
+            <div className="space-y-4">
+              <h2 className="text-3xl font-bold">
+                {slot?.movie_name || "Movie"}
               </h2>
 
-              <div className="mt-4 space-y-3 text-slate-600">
+              <p>🎭 {location?.name || "Theater"}</p>
 
-                {/* 🎬 MOVIE */}
-                <p className="text-sm font-medium text-slate-500">Movie</p>
-                <p>{movieName}</p>
+              <div className="border-t pt-4 space-y-2">
+                <p>📍 {location?.city || location?.name}</p>
+                <p>📺 {screen?.name}</p>
+                <p>🎞️ {slot?.language}</p>
+                <p>⏰ {slot?.start_time} - {slot?.end_time}</p>
+                <p>📅 {bookingDate || "N/A"}</p>
+              </div>
 
-                {/* 🌐 LANGUAGE */}
-                {language && (
-                  <>
-                    <p className="text-sm font-medium text-slate-500">Language</p>
-                    <p>{language}</p>
-                  </>
-                )}
+              {/* 🎫 SEATS */}
+              <div className="border-t pt-4">
+                <h3 className="font-bold">
+                  🎫 Selected Seats ({bookingDetails.length})
+                </h3>
 
-                {/* 🏢 THEATER */}
-                <p className="text-sm font-medium text-slate-500">Theater</p>
-                <p>{location?.name || location?.location_name}</p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {bookingDetails.map((b) => (
+                    <span
+                      key={b.seat_id || b.id}
+                      className="bg-purple-100 px-3 py-1 rounded"
+                    >
+                      {b.seat_label || b.seat_number}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
 
-                {/* 🎥 SCREEN */}
-                <p className="text-sm font-medium text-slate-500">Screen</p>
-                <p>{screen?.name || "Screen"}</p>
+          {/* 💳 PAYMENT */}
+          <div className="bg-gray-50 px-8 py-6 border-t">
+            <div className="flex justify-between mb-4">
+              <div>
+                <p>Total Seats</p>
+                <p className="text-xl font-bold">
+                  {bookingDetails.length}
+                </p>
+              </div>
 
-                {/* ⏰ TIME */}
-                <p className="text-sm font-medium text-slate-500">Time</p>
-                <p>
-                  {slot?.start_time} - {slot?.end_time}
+              <div className="text-right">
+                <p>Total Amount</p>
+                <p className="text-2xl text-green-600 font-bold">
+                  ₹{totalPrice}
                 </p>
               </div>
             </div>
 
-            <div className="rounded-3xl border bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-slate-900">
-                Payment
-              </h2>
-              <p className="mt-4 text-slate-600">
-                This is a mock payment step.
-              </p>
-            </div>
+            <button
+              onClick={handlePayment}
+              disabled={loading}
+              className="w-full bg-green-600 text-white py-3 rounded-xl"
+            >
+              {loading ? "Processing..." : `💳 Pay ₹${totalPrice}`}
+            </button>
+
           </div>
 
-          {/* RIGHT SIDE */}
-          <BookingSummary
-            show={{
-              movie_title: movieName, // ✅ FIXED
-              theater_name: location?.name,
-              datetime: `${slot?.start_time} - ${slot?.end_time}`,
-              language: language, // ✅ optional if used
-            }}
-            selectedSeats={selectedSeats || []}
-            totalPrice={totalPrice || 0}
-          />
         </div>
-
-        {error && (
-          <div className="mt-6 rounded-3xl bg-rose-50 p-5 text-red-600">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-8 flex justify-between">
-          <button
-            onClick={() => navigate(-1)}
-            className="border px-6 py-3 rounded"
-          >
-            Back
-          </button>
-
-          <button
-            onClick={handleConfirm}
-            disabled={processing}
-            className="bg-green-600 text-white px-6 py-3 rounded"
-          >
-            {processing ? "Processing..." : `Confirm ₹${totalPrice}`}
-          </button>
-        </div>
-
       </div>
     </div>
   );

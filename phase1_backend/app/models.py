@@ -251,3 +251,29 @@ class TheaterSeat(Base):
 
     location = relationship("Location")
     category = relationship("SeatCategory", back_populates="theater_seats")
+
+class MovieImage(Base):
+    __tablename__ = "movie_images"
+
+    id = Column(Integer, primary_key=True)
+    timeslot_id = Column(String, ForeignKey("time_slots.id"))
+    location_id = Column(String, ForeignKey("locations.id"))
+    movie_name = Column(String)
+    language = Column(String)
+    image_url = Column(String)
+
+class MovieCast(Base):
+    __tablename__ = "movie_cast"
+
+    id = Column(Integer, primary_key=True)
+    timeslot_id = Column(String, ForeignKey("time_slots.id"))
+    location_id = Column(String, ForeignKey("locations.id"))
+
+    movie_name = Column(String)
+    language = Column(String)
+
+    name = Column(String)
+    role = Column(String)
+    member_type = Column(String, default="cast")  # cast / crew
+
+    photo_url = Column(String)   # if you added

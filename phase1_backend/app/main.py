@@ -1,14 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 import os
-import asyncio
 
-# DB & Models
 from app.database import engine
-import app.models as models
+import app.models as models   # <-- IMPORTANT CHANGE
 
-# Routers
 from app.routes import auth_routes
 from app.routes import provider_routes
 from app.routes import admin_routes
@@ -20,61 +18,40 @@ from app.routes import seat_management_routes
 from app.routes import timeslot_routes
 from app.routes import booking_routes
 from app.routes import reservation_routes
+import asyncio
+from app.seat_cleaner import release_expired_seats
 from app.routes import payment_routes
 from app.routes import theater_routes
 from app.routes import screen_routes
 
-# Background Task
-from app.seat_cleaner import release_expired_seats
+app = FastAPI()
 
+# auto create upload folders
+os.makedirs("uploads/locations", exist_ok=True)
+os.makedirs("tickets", exist_ok=True)
 
-# =========================
-# 🚀 APP INIT
-# =========================
-app = FastAPI(title="Seat Booking API")
+# static images
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/tickets", StaticFiles(directory="tickets"), name="tickets")
 
-
-# =========================
-# 📁 CREATE FOLDERS
-# =========================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-UPLOAD_DIR = os.path.join(BASE_DIR, "..", "uploads")
-LOCATION_UPLOADS = os.path.join(UPLOAD_DIR, "locations")
-TICKET_DIR = os.path.join(BASE_DIR, "..", "tickets")
-
-os.makedirs(LOCATION_UPLOADS, exist_ok=True)
-os.makedirs(TICKET_DIR, exist_ok=True)
-
-
-# =========================
-# 📸 STATIC FILES
-# =========================
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
-app.mount("/tickets", StaticFiles(directory=TICKET_DIR), name="tickets")
-
-
-# =========================
-# 🌐 CORS (IMPORTANT)
-# =========================
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ⚠️ restrict in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# =========================
-# 🗄️ CREATE TABLES
-# =========================
+# IMPORTANT: create tables AFTER models are imported
 models.Base.metadata.create_all(bind=engine)
 
+with engine.begin() as connection:
+    connection.execute(
+        text("ALTER TABLE movie_cast ADD COLUMN IF NOT EXISTS member_type VARCHAR DEFAULT 'cast'")
+    )
 
-# =========================
-# 🔌 ROUTES
-# =========================
+# Routers
 app.include_router(auth_routes.router)
 app.include_router(provider_routes.router)
 app.include_router(admin_routes.router)
@@ -91,17 +68,13 @@ app.include_router(theater_routes.router)
 app.include_router(screen_routes.router)
 
 
-# =========================
-# 🏠 ROOT
-# =========================
+
 @app.get("/")
 def home():
-    return {"message": "Seat Booking Backend Running 🚀"}
+    return {"message": "Seat Booking Backend Running"}
 
-
-# =========================
-# ⏳ BACKGROUND TASK
-# =========================
 @app.on_event("startup")
 async def start_seat_cleaner():
+    # Start the seat cleaner in the background
     asyncio.create_task(release_expired_seats())
+

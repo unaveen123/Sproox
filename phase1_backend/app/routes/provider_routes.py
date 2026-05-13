@@ -83,9 +83,12 @@ def get_location_bookings(
 
     today = date.today()
 
-    bookings = db.query(models.Booking).filter(
-        models.Booking.slot_id != None
-    ).all()
+    bookings = (
+        db.query(models.Booking)
+        .join(models.TimeSlot, models.TimeSlot.id == models.Booking.slot_id)
+        .filter(models.TimeSlot.location_id == location_id)
+        .all()
+    )
 
     result = []
 
@@ -97,15 +100,20 @@ def get_location_bookings(
             if not seat or seat.location_id != location_id:
                 continue
             seat_label = seat.seat_number
+            price = seat.price_per_hour
 
         else:
             seat = db.query(models.TheaterSeat).filter(models.TheaterSeat.id == booking.theater_seat_id).first()
             if not seat or seat.location_id != location_id:
                 continue
             seat_label = seat.seat_label
+            price = seat.category.price if seat.category else 0
 
         user = db.query(models.User).filter(models.User.id == booking.user_id).first()
         slot = db.query(models.TimeSlot).filter(models.TimeSlot.id == booking.slot_id).first()
+
+        if not user or not slot:
+            continue
 
         booking_date = booking.booking_date
 
@@ -124,12 +132,16 @@ def get_location_bookings(
             "user_phone": user.phone,
             "seat": seat_label,
             "movie": getattr(slot, "movie_name", None),   # 🎬 NEW
-            "date": booking_date,
+            "date": str(booking_date),
             "start_time": str(slot.start_time),
             "end_time": str(slot.end_time),
-            "status": booking.status
+            "status": booking.status,
+            "price": price,
+            "amount": price,
+            "payment_status": booking.payment.status if booking.payment else None,
         })
 
+    result.sort(key=lambda x: (x["date"], x["start_time"]), reverse=True)
     return result
 
 

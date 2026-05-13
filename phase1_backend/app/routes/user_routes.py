@@ -24,16 +24,89 @@ def get_locations(db: Session = Depends(get_db)):
     result = []
 
     for loc in locations:
+        location_image = db.query(models.LocationImage).filter(
+            models.LocationImage.location_id == loc.id
+        ).first()
+
+        movie_posters = [
+            {
+                "movie_name": name,
+                "image_url": image_url,
+            }
+            for (name, image_url) in db.query(models.MovieImage.movie_name, models.MovieImage.image_url)
+            .filter(
+                models.MovieImage.location_id == loc.id,
+                models.MovieImage.movie_name.isnot(None),
+                models.MovieImage.image_url.isnot(None)
+            )
+            .distinct()
+            .all()
+            if name and image_url
+        ]
+
+        movie_names = [
+            name for (name,) in db.query(models.TimeSlot.movie_name)
+            .filter(
+                models.TimeSlot.location_id == loc.id,
+                models.TimeSlot.movie_name.isnot(None)
+            )
+            .distinct()
+            .all()
+            if name
+        ]
+
+        show_count = db.query(models.TimeSlot).filter(
+            models.TimeSlot.location_id == loc.id
+        ).count()
+
         result.append({
             "location_id": loc.id,
             "name": loc.name,
             "address": loc.address,
             "city": loc.city,
             "description": loc.description,
-            "provider_business": loc.provider.business_name
+            "provider_business": loc.provider.business_name,
+            "image_url": location_image.image_url if location_image else None,
+            "poster_url": movie_posters[0]["image_url"] if movie_posters else None,
+            "movie_posters": movie_posters,
+            "movie_names": movie_names,
+            "show_count": show_count,
         })
 
     return result
+
+
+# ================= GET MOVIE CAST/CREW =================
+@router.get("/locations/{location_id}/movie-cast")
+def get_movie_cast(location_id: str, movie_name: str | None = None, db: Session = Depends(get_db)):
+    location = db.query(models.Location).filter(models.Location.id == location_id).first()
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    query = db.query(models.MovieCast).filter(models.MovieCast.location_id == location_id)
+    if movie_name:
+        query = query.filter(models.MovieCast.movie_name == movie_name)
+
+    members = query.all()
+
+    cast = [
+        {
+            "id": member.id,
+            "name": member.name,
+            "role": member.role,
+            "member_type": member.member_type,
+            "photo_url": member.photo_url,
+            "movie_name": member.movie_name,
+            "language": member.language,
+            "timeslot_id": member.timeslot_id,
+        }
+        for member in members
+    ]
+
+    return {
+        "cast": [m for m in cast if m["member_type"] == "cast"],
+        "crew": [m for m in cast if m["member_type"] != "cast"],
+    }
 
 
 # ================= GET SCREENS =================
@@ -77,6 +150,10 @@ def get_location_timeslots(location_id: str, db: Session = Depends(get_db)):
             if screen:
                 screen_name = screen.name
 
+        movie_images = db.query(models.MovieImage).filter(
+            models.MovieImage.timeslot_id == s.id
+        ).all()
+
         result.append({
             "slot_id": s.id,
             "screen_id": s.screen_id,
@@ -84,7 +161,9 @@ def get_location_timeslots(location_id: str, db: Session = Depends(get_db)):
             "start_time": s.start_time.strftime("%I:%M %p"),
             "end_time": s.end_time.strftime("%I:%M %p"),
             "movie_name": s.movie_name,  # ✅ IMPORTANT
-            "language": s.language       # ✅ IMPORTANT
+            "language": s.language,      # ✅ IMPORTANT
+            "images": [image.image_url for image in movie_images],
+            "poster_url": movie_images[0].image_url if movie_images else None,
         })
 
     return result

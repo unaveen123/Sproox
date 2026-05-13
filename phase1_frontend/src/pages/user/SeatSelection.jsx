@@ -2,6 +2,14 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
 
+const getLocalDateString = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 const SeatSelection = () => {
   const { id: locationId } = useParams();
   const location = useLocation();
@@ -26,7 +34,7 @@ const SeatSelection = () => {
   // ================= FETCH SEATS =================
   const fetchSeats = async (slotId) => {
     try {
-      const bookingDate = new Date().toISOString().split("T")[0];
+      const bookingDate = getLocalDateString();
 
       const res = await axios.get(
         `http://127.0.0.1:8000/user/locations/${locationId}/theater-seats`,
@@ -49,13 +57,37 @@ const SeatSelection = () => {
     if (selectedSlotId) fetchSeats(selectedSlotId);
   }, [selectedSlotId]);
 
-  // ================= GROUP BY CATEGORY =================
-  const categories = {};
+  // ================= GROUP BY ROW =================
+  const rows = {};
   seats.forEach((seat) => {
-    const cat = seat.category || "General";
-    if (!categories[cat]) categories[cat] = [];
-    categories[cat].push(seat);
+    const rowKey = seat.seat_number?.charAt(0) || seat.row || "A";
+    if (!rows[rowKey]) rows[rowKey] = [];
+    rows[rowKey].push(seat);
   });
+
+  const getSeatStatus = (seat) => {
+    const booked = seat.is_booked || seat.status === "booked" || seat.status === "BOOKED" || seat.status === "occupied";
+    const selected = selectedSeats.some((selected) => {
+      const selectedId = selected.seat_id || selected.id;
+      const seatId = seat.seat_id || seat.id;
+      return selectedId && seatId && selectedId === seatId;
+    });
+    return booked ? "booked" : selected ? "selected" : "available";
+  };
+
+  const getSeatNumberLabel = (seat) => {
+    const seatNumber = seat.seat_number || seat.label || "";
+    const match = seatNumber.toString().match(/\d+$/);
+    return match ? match[0] : seatNumber;
+  };
+
+  const getSeatStyle = (seat) => {
+    const categoryName = (seat.category || seat.category_name || "General").toLowerCase();
+    if (categoryName.includes("plus") || categoryName.includes("diamond") || categoryName.includes("premium")) return "bg-amber-100 text-amber-700";
+    if (categoryName.includes("classic") || categoryName.includes("silver")) return "bg-sky-100 text-sky-700";
+    if (categoryName.includes("regular") || categoryName.includes("bronze") || categoryName.includes("gold")) return "bg-emerald-100 text-emerald-700";
+    return "bg-slate-100 text-slate-700";
+  };
 
   // ================= SELECT =================
   const toggleSeat = (seat) => {
@@ -107,7 +139,7 @@ const SeatSelection = () => {
     setBookingLoading(true);
     setBookingStatus("");
 
-    const bookingDate = new Date().toISOString().split("T")[0];
+    const bookingDate = getLocalDateString();
     const bookings = [];
     let errorMessage = null;
 
@@ -153,11 +185,12 @@ const SeatSelection = () => {
       return;
     }
 
-    navigate("/payment", {
+    navigate("/summary", {
       state: {
         bookingDetails: bookings,
         slot: slots?.find((s) => s.slot_id === selectedSlotId) || slot,
         screen,
+        location: { name: "Theater", city: "City" },
         totalPrice,
         bookingDate,
       },
@@ -240,68 +273,50 @@ const SeatSelection = () => {
       </div>
 
       {/* 🔥 SEATS */}
-      <div
-        className="flex flex-col items-center"
-        style={{ transform: `scale(${zoom})` }}
-      >
-        {Object.keys(categories).map((category) => {
-          const categorySeats = categories[category];
+      <div className="flex flex-col items-center">
+        <div className="w-full max-w-5xl rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm" style={{ transform: `scale(${zoom})` }}>
+          <div className="text-center mb-6">
+            <div className="mx-auto mb-3 h-2 w-2/3 rounded-full bg-slate-200" />
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Screen</p>
+          </div>
 
-          const rows = {};
-          categorySeats.forEach((seat) => {
-            const row = seat.seat_number[0];
-            if (!rows[row]) rows[row] = [];
-            rows[row].push(seat);
-          });
+          {Object.keys(rows)
+            .sort()
+            .reverse()
+            .map((row) => (
+              <div key={row} className="flex items-center justify-center gap-3 mb-3">
+                <div className="w-6 text-sm font-medium text-slate-700">{row}</div>
+                <div className="flex flex-wrap items-center gap-2 justify-center">
+                  {rows[row]
+                    .sort((a, b) => (a.seat_number || "").localeCompare(b.seat_number || ""))
+                    .map((seat) => {
+                      const status = getSeatStatus(seat);
+                      const isBooked = status === "booked";
+                      const isSelected = status === "selected";
+                      const seatStyle = getSeatStyle(seat);
 
-          return (
-            <div key={category} className="mb-12">
-
-              {/* CATEGORY */}
-              <h2 className="text-center font-semibold mb-4 text-lg">
-                ₹{categorySeats[0]?.price} {category.toUpperCase()}
-              </h2>
-
-              {/* ROWS */}
-              {Object.keys(rows)
-                .sort()
-                .reverse()
-                .map((row) => (
-                  <div
-                    key={row}
-                    className="flex items-center justify-center mb-2"
-                  >
-                    <div className="w-6 text-sm font-medium">{row}</div>
-
-                    <div className="flex gap-2">
-                      {rows[row].map((seat) => {
-                        const isSelected = selectedSeats.find(
-                          (s) => s.seat_id === seat.seat_id
-                        );
-
-                        return (
-                          <button
-                            key={seat.seat_id}
-                            onClick={() => toggleSeat(seat)}
-                            disabled={seat.is_booked}
-                            className={`w-9 h-9 text-xs rounded-md border transition ${
-                              seat.is_booked
-                                ? "bg-gray-400 cursor-not-allowed"
-                                : isSelected
-                                ? "bg-green-500 text-white scale-110"
-                                : "bg-white hover:bg-gray-200"
-                            }`}
-                          >
-                            {seat.seat_number.slice(1)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          );
-        })}
+                      return (
+                        <button
+                          key={seat.seat_id || seat.id || seat.seat_number}
+                          type="button"
+                          disabled={isBooked}
+                          onClick={() => toggleSeat(seat)}
+                          className={`w-10 h-10 rounded-2xl border px-2 py-2 text-xs font-semibold transition ${
+                            isBooked
+                              ? "cursor-not-allowed border-slate-300 bg-slate-200 text-slate-400"
+                              : isSelected
+                              ? "border-red-500 bg-red-500 text-white shadow"
+                              : `border-slate-300 bg-white text-slate-900 hover:border-slate-900 hover:bg-slate-50 ${seatStyle}`
+                          }`}
+                        >
+                          {getSeatNumberLabel(seat) || "-"}
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            ))}
+        </div>
       </div>
 
       {/* 🔥 BOTTOM BAR */}

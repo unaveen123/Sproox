@@ -11,9 +11,12 @@ const DeleteScreen = () => {
   const [selectedLocation, setSelectedLocation] = useState("");
   const [selectedScreen, setSelectedScreen] = useState("");
 
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [message, setMessage] = useState("");
+
   const BASE_URL = "http://127.0.0.1:8000";
 
-  // ✅ FETCH LOCATIONS
+  // FETCH LOCATIONS
   useEffect(() => {
     const fetchLocations = async () => {
       try {
@@ -26,18 +29,16 @@ const DeleteScreen = () => {
           }
         );
 
-        console.log("✅ LOCATIONS DATA:", res.data);
-
         setLocations(res.data || []);
-      } catch (err) {
-        console.log("❌ Location error:", err);
+      } catch {
+        setMessage("❌ Failed to load locations");
       }
     };
 
     fetchLocations();
   }, []);
 
-  // ✅ FETCH SCREENS (FIXED PROPERLY)
+  // FETCH SCREENS
   useEffect(() => {
     if (!selectedLocation) {
       setScreens([]);
@@ -46,8 +47,6 @@ const DeleteScreen = () => {
 
     const fetchScreens = async () => {
       try {
-        console.log("👉 Calling screens API with ID:", selectedLocation);
-
         const res = await axios.get(
           `${BASE_URL}/provider/location/${selectedLocation}/screens`,
           {
@@ -57,12 +56,10 @@ const DeleteScreen = () => {
           }
         );
 
-        console.log("✅ SCREENS DATA:", res.data);
-
         setScreens(res.data || []);
-      } catch (err) {
-        console.log("❌ Screen error:", err);
+      } catch {
         setScreens([]);
+        setMessage("❌ Failed to load screens");
       }
     };
 
@@ -70,14 +67,12 @@ const DeleteScreen = () => {
     setSelectedScreen("");
   }, [selectedLocation]);
 
-  // ✅ DELETE SCREEN
+  // DELETE
   const handleDelete = async () => {
     if (!selectedLocation || !selectedScreen) {
-      alert("Select location and screen");
+      setMessage("⚠️ Select location and screen");
       return;
     }
-
-    if (!window.confirm("Are you sure to delete this screen?")) return;
 
     try {
       await axios.delete(
@@ -89,87 +84,142 @@ const DeleteScreen = () => {
         }
       );
 
-      alert("✅ Screen deleted successfully");
+      setMessage("✅ Screen deleted successfully");
 
-      // refresh UI
       setScreens((prev) =>
         prev.filter((scr) => scr.id !== selectedScreen)
       );
 
       setSelectedScreen("");
-    } catch (err) {
-      console.log("❌ Delete error:", err);
-      alert("Error deleting screen");
+    } catch {
+      setMessage("❌ Error deleting screen");
     }
   };
 
+  // AUTO HIDE
+  useEffect(() => {
+    if (message) {
+      const timer = setTimeout(() => setMessage(""), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [message]);
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 to-black">
-      <div className="bg-purple-800 p-8 rounded-2xl w-[400px] shadow-lg">
+    <div className="min-h-screen bg-gray-100 p-6">
 
-        {/* BACK BUTTON */}
+      {/* TOAST */}
+      {message && (
+        <div className="fixed top-5 right-5 px-4 py-3 rounded shadow-lg text-white bg-green-500">
+          {message}
+        </div>
+      )}
+
+      {/* ALIGN FIX */}
+      <div className="max-w-3xl mx-auto">
+
+        {/* BACK */}
         <button
-          onClick={() => navigate("/")}
-          className="text-white mb-4"
+          onClick={() => navigate("/provider/dashboard")}
+          className="mb-4 px-5 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 font-medium"
         >
-          ← Back
+          Back
         </button>
 
-        <h2 className="text-white text-xl mb-6 text-center">
-          🗑 Delete Screen
-        </h2>
+        {/* CARD */}
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
 
-        {/* LOCATION DROPDOWN (FIXED) */}
-        <select
-          className="w-full mb-4 p-3 rounded bg-purple-600 text-white"
-          value={selectedLocation}
-          onChange={(e) => {
-            console.log("🎯 Selected Location ID:", e.target.value);
-            setSelectedLocation(e.target.value);
-          }}
-        >
-          <option value="">Select Location</option>
+          {/* HEADER */}
+          <div className="bg-gradient-to-r from-purple-600 to-pink-500 p-6 text-white">
+            <h2 className="text-2xl font-bold">Delete Screen</h2>
+          </div>
 
-          {locations.map((loc, index) => {
-            const locId = loc.id || loc.location_id; // 🔥 FIX
+          {/* BODY */}
+          <div className="p-6">
 
-            return (
-              <option key={locId || index} value={locId}>
-                {loc.name || loc.location_name}
+            {/* LOCATION */}
+            <select
+              value={selectedLocation}
+              onChange={(e) => setSelectedLocation(e.target.value)}
+              className="w-full mb-4 p-3 rounded-lg border border-gray-300"
+            >
+              <option value="">Select Location</option>
+
+              {locations.map((loc, index) => {
+                const locId = loc.id || loc.location_id;
+                return (
+                  <option key={locId || index} value={locId}>
+                    {loc.name || loc.location_name}
+                  </option>
+                );
+              })}
+            </select>
+
+            {/* SCREEN */}
+            <select
+              value={selectedScreen}
+              onChange={(e) => setSelectedScreen(e.target.value)}
+              disabled={!selectedLocation}
+              className="w-full mb-6 p-3 rounded-lg border border-gray-300"
+            >
+              <option value="">
+                {screens.length === 0
+                  ? "No Screens Available"
+                  : "Select Screen"}
               </option>
-            );
-          })}
-        </select>
 
-        {/* SCREEN DROPDOWN */}
-        <select
-          className="w-full mb-4 p-3 rounded bg-purple-600 text-white"
-          value={selectedScreen}
-          onChange={(e) => setSelectedScreen(e.target.value)}
-          disabled={!selectedLocation}
-        >
-          <option value="">
-            {screens.length === 0
-              ? "No Screens Available"
-              : "Select Screen"}
-          </option>
+              {screens.map((scr, index) => (
+                <option key={scr.id || index} value={scr.id}>
+                  {scr.name || `Screen ${scr.screen_number}`}
+                </option>
+              ))}
+            </select>
 
-          {screens.map((scr, index) => (
-            <option key={scr.id || index} value={scr.id}>
-              {scr.name || `Screen ${scr.screen_number}`}
-            </option>
-          ))}
-        </select>
+            {/* DELETE BUTTON */}
+            <button
+              onClick={() => setShowConfirm(true)}
+              className="w-full py-3 rounded-lg text-white font-semibold bg-red-500 hover:bg-red-600"
+            >
+              Delete Screen
+            </button>
 
-        {/* DELETE BUTTON */}
-        <button
-          onClick={handleDelete}
-          className="w-full py-3 bg-red-500 rounded text-white font-semibold"
-        >
-          Delete Screen
-        </button>
-
+          </div>
+        </div>
       </div>
+
+      {/* CONFIRM POPUP */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-xl text-center w-80 shadow-lg">
+            <h3 className="text-lg font-semibold mb-3">
+              Confirm Delete
+            </h3>
+
+            <p className="mb-4 text-gray-600">
+              Are you sure you want to delete this screen?
+            </p>
+
+            <div className="flex justify-center gap-4">
+              <button
+                onClick={() => {
+                  setShowConfirm(false);
+                  handleDelete();
+                }}
+                className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+              >
+                Yes
+              </button>
+
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="bg-gray-300 px-4 py-2 rounded hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

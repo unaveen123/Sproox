@@ -8,6 +8,7 @@ const Ticket = () => {
   const ticketRef = useRef();
 
   const group = state?.group || [];
+  const location = state?.location;  // ✅ GET LOCATION
   const first = group[0];
 
   const downloadPDF = async () => {
@@ -28,6 +29,9 @@ const Ticket = () => {
         <h2 className="text-xl font-bold">
           {first.movie_name}
         </h2>
+
+        <p className="text-sm font-medium text-gray-600 mt-3">Location</p>
+        <p>{location?.name || location?.location_name || "N/A"}</p>
 
         <p>{first.language}</p>
         <p>{first.screen_name}</p>

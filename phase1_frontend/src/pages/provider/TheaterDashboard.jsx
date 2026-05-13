@@ -9,6 +9,25 @@ import {
   FaTimesCircle,
 } from "react-icons/fa";
 
+const safeDate = (value) => {
+  if (!value) return null;
+  const [datePart] = value.toString().split("T");
+  const parts = datePart.split("-").map(Number);
+
+  if (parts.length === 3 && parts.every(Boolean)) {
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getTodayStart = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
 export default function TheaterDashboard() {
   const navigate = useNavigate();
   const [showProfile, setShowProfile] = useState(false);
@@ -25,6 +44,7 @@ export default function TheaterDashboard() {
   });
 
   const [recentBookings, setRecentBookings] = useState([]);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   const token = localStorage.getItem("token");
 
@@ -45,6 +65,8 @@ export default function TheaterDashboard() {
 
   // 🔥 FETCH DASHBOARD
   const fetchDashboard = async () => {
+    setLastUpdated(new Date().toISOString());
+
     try {
       const locRes = await axios.get(
         "http://127.0.0.1:8000/provider/location/my-locations",
@@ -56,45 +78,84 @@ export default function TheaterDashboard() {
       const locations = locRes.data;
 
       if (locations.length > 0) {
-        const location = locations[0];
-        setTheaterName(location.name);
-
-        const bookingRes = await axios.get(
-          `http://127.0.0.1:8000/provider/location-bookings/${location.id}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
+        setTheaterName(
+          locations.length === 1
+            ? locations[0].name || locations[0].location_name || "My Theater"
+            : "All Theaters"
         );
 
-        const bookings = bookingRes.data || [];
-        setRecentBookings(bookings.slice(0, 3));
+        const bookingResponses = await Promise.allSettled(
+          locations
+            .map((location) => location.id || location.location_id)
+            .filter(Boolean)
+            .map((locationId) =>
+              axios.get(
+                `http://127.0.0.1:8000/provider/location-bookings/${locationId}`,
+                {
+                  headers: { Authorization: `Bearer ${token}` },
+                }
+              )
+            )
+        );
 
-        const total = bookings.length;
-        const cancelled = bookings.filter(
+        const bookings = bookingResponses.flatMap((response) =>
+          response.status === "fulfilled" ? response.value.data || [] : []
+        );
+
+        const todayDate = getTodayStart();
+
+        const todayDateString = getTodayStart().toISOString().slice(0, 10);
+
+        const bookingsWithDates = bookings.map((b) => {
+          const rawDate = String(b.date || "").split("T")[0];
+          return {
+            ...b,
+            status: (b.status || "").toLowerCase(),
+            rawDate,
+            _date: safeDate(rawDate) || safeDate(b.date),
+          };
+        });
+
+        const paidBookings = bookingsWithDates.filter(
+          (b) => b.status === "confirmed"
+        );
+        const total = bookingsWithDates.length;
+        const cancelled = bookingsWithDates.filter(
           (b) => b.status === "cancelled"
         ).length;
 
-        const today = bookings.filter((b) => {
-          const todayDate = new Date().toISOString().split("T")[0];
-          return b.booking_date?.startsWith(todayDate);
+        const today = bookingsWithDates.filter((b) => {
+          return b.rawDate === todayDateString;
         }).length;
 
-        const revenue = bookings
-          .filter((b) => b.status === "confirmed")
-          .reduce((sum, b) => sum + (b.price || 0), 0);
+        const revenue = paidBookings.reduce(
+          (sum, b) => sum + Number(b.price || b.amount || 0),
+          0
+        );
+
+        const sortedBookings = bookingsWithDates.sort((a, b) => {
+          const dateA = a._date ? a._date.getTime() : 0;
+          const dateB = b._date ? b._date.getTime() : 0;
+          if (dateA !== dateB) return dateB - dateA;
+          return (b.start_time || "").localeCompare(a.start_time || "");
+        });
+
+        setRecentBookings(sortedBookings.slice(0, 3));
+        setLastUpdated(new Date().toISOString());
 
         setStats({
           totalBookings: total,
           todayBookings: today,
           cancelled: cancelled,
           revenue: revenue,
-          occupancy: total
-            ? ((total / 100) * 100).toFixed(2) + "%"
-            : "0%",
+          occupancy:
+            total > 0
+              ? ((paidBookings.length / total) * 100).toFixed(2) + "%"
+              : "0%",
         });
       }
     } catch (err) {
-      console.log("Dashboard Error:", err);
+      console.error("Dashboard Error:", err.message);
     }
   };
 
@@ -102,7 +163,7 @@ export default function TheaterDashboard() {
     fetchUser();
     fetchDashboard();
 
-    const interval = setInterval(fetchDashboard, 5000);
+    const interval = setInterval(fetchDashboard, 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -110,10 +171,15 @@ export default function TheaterDashboard() {
     <div className="min-h-screen bg-gray-100">
 
       {/* HEADER */}
-      <div className="bg-gradient-to-r from-purple-600 to-pink-500 px-6 py-4 flex justify-between items-center shadow">
-        <h1 className="text-white text-2xl font-bold">
-          🎬 Theater Dashboard
-        </h1>
+      <div className="bg-linear-to-r from-purple-600 to-pink-500 px-6 py-4 flex flex-col gap-3 shadow md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-white text-2xl font-bold">
+            🎬 Theater Dashboard
+          </h1>
+          <p className="text-sm text-white/80 mt-1">
+            Last updated: {lastUpdated ? new Date(lastUpdated).toLocaleTimeString() : "Loading..."} · Auto refresh every 2 seconds
+          </p>
+        </div>
 
         <div className="relative">
           <button
@@ -172,9 +238,11 @@ export default function TheaterDashboard() {
         </div>
 
         {/* 🔴 BOTTOM ROW */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           <ActionButton title="Delete Screen" onClick={() => navigate("/delete-screen")} />
           <ActionButton title="Delete Completed Shows" onClick={() => navigate("/delete-completed-shows")} />
+          <ActionButton title="Upload Movie Images" onClick={() => navigate("/upload-movie-images")} />
+          <ActionButton title="Add Movie Cast" onClick={() => navigate("/add-movie-cast")} />
         </div>
 
       </div>
@@ -196,17 +264,44 @@ export default function TheaterDashboard() {
       <div className="p-6">
         <h2 className="text-xl font-bold mb-4">Recent Bookings</h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="space-y-3">
           {recentBookings.length === 0 ? (
             <p>No bookings yet</p>
           ) : (
             recentBookings.map((b, i) => (
-              <div key={i} className="bg-white p-4 rounded-xl shadow">
-                <p className="font-semibold">{b.movie || "Movie"}</p>
-                <p className="text-sm">Seat: {b.seat_id}</p>
-                <p className="text-sm text-gray-500">
-                  Status: {b.status}
+              <div
+                key={i}
+                className="bg-white px-4 py-3 rounded-lg shadow flex flex-col gap-3 md:grid md:grid-cols-[1.2fr_1.4fr_0.8fr_1fr_0.8fr_auto] md:items-center"
+              >
+                <div>
+                  <p className="font-semibold text-gray-900">{b.user_name}</p>
+                  <p className="text-xs text-gray-500">{b.user_phone}</p>
+                </div>
+
+                <div>
+                  <p className="text-sm font-medium text-gray-700">{b.movie || "Movie"}</p>
+                  <p className="text-xs text-gray-500">Seat: {b.seat}</p>
+                </div>
+
+                <p className="text-sm text-gray-600">{b.date}</p>
+
+                <p className="text-sm text-gray-600">
+                  {b.start_time} - {b.end_time}
                 </p>
+
+                <p className="text-sm font-semibold text-gray-900">
+                  â‚¹{b.price || b.amount || 0}
+                </p>
+
+                <div className="md:text-right">
+                  <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                    b.status === "confirmed"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-red-100 text-red-700"
+                  }`}>
+                    {b.status.toUpperCase()}
+                  </span>
+                </div>
               </div>
             ))
           )}
@@ -220,7 +315,7 @@ function ActionButton({ title, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="bg-gradient-to-r from-purple-600 to-purple-800 text-white p-4 rounded-xl shadow hover:scale-105 transition"
+      className="bg-linear-to-r from-purple-600 to-purple-800 text-white p-4 rounded-xl shadow hover:scale-105 transition"
     >
       {title}
     </button>

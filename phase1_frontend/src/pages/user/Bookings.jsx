@@ -9,6 +9,7 @@ const Bookings = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [cancellingId, setCancellingId] = useState(null);
+  const [cancelModalGroup, setCancelModalGroup] = useState(null);
   const [downloadingId, setDownloadingId] = useState(null);
   const [shareMessage, setShareMessage] = useState("");
 
@@ -55,17 +56,24 @@ const Bookings = () => {
     }, {})
   );
 
-  // ❌ CANCEL BOOKING WITH CONFIRMATION
-  const cancelBooking = async (group) => {
-    const bookingCount = group.length;
-    const totalPrice = group.reduce((sum, b) => sum + (b.price || 0), 0);
-    const seats = group.map((b) => b.seat).join(", ");
+  // ❌ OPEN CANCEL CONFIRMATION MODAL
+  const openCancelModal = (group) => {
+    setCancelModalGroup(group);
+  };
 
-    const confirmMsg = `Cancel booking for:\n\n${group[0].movie_name}\nSeats: ${seats}\nTotal: ₹${totalPrice}\n\nRefund will be processed to your original payment method.`;
-    
-    if (!window.confirm(confirmMsg)) return;
+  const confirmCancelBooking = async () => {
+    if (!cancelModalGroup || cancelModalGroup.length === 0) return;
+    if (!isCancellable(cancelModalGroup)) {
+      setShareMessage("❌ This booking cannot be cancelled.");
+      setTimeout(() => setShareMessage(""), 4000);
+      setCancelModalGroup(null);
+      return;
+    }
 
-    setCancellingId(group[0].booking_id);
+    const group = cancelModalGroup;
+    const bookingId = group[0].booking_id;
+
+    setCancellingId(bookingId);
     try {
       await Promise.all(
         group.map((b) =>
@@ -79,13 +87,20 @@ const Bookings = () => {
         )
       );
 
-      alert("✓ Booking cancelled successfully.\nRefund will be processed within 3-5 business days.");
+      setShareMessage("✓ Booking cancelled successfully. Refund will be processed within 3-5 business days.");
+      setTimeout(() => setShareMessage(""), 4000);
     } catch (err) {
       console.error("Cancel error:", err);
-      alert(`Cancel failed: ${err.response?.data?.detail || err.message}`);
+      setShareMessage(`❌ Cancel failed: ${err.response?.data?.detail || err.message}`);
+      setTimeout(() => setShareMessage(""), 4000);
     } finally {
       setCancellingId(null);
+      setCancelModalGroup(null);
     }
+  };
+
+  const closeCancelModal = () => {
+    setCancelModalGroup(null);
   };
 
   // 📄 DOWNLOAD PDF - SIMPLIFIED AND RELIABLE
@@ -163,6 +178,19 @@ const Bookings = () => {
     } finally {
       setDownloadingId(null);
     }
+  };
+
+  const isCancellable = (group) => {
+    if (!group || group.length === 0) return false;
+
+    const status = (group[0].status || "").toString().trim().toLowerCase();
+    if (status === "cancelled") return false;
+
+    const bookingDateValue = String(group[0].date || "").split("T")[0];
+    if (!bookingDateValue) return status !== "cancelled";
+
+    const todayValue = new Date().toISOString().split("T")[0];
+    return bookingDateValue >= todayValue;
   };
 
   // 📤 SHARE - IMPROVED WITH WEB SHARE API
@@ -257,6 +285,12 @@ Check out my booking on Sproox!`,
                       {first.start_time} - {first.end_time}
                     </p>
 
+                    {first.date && (
+                      <p className="text-sm text-slate-500 mt-2">
+                        Date: {String(first.date).split("T")[0]}
+                      </p>
+                    )}
+
                     <p className="mt-2">
                       Seats: {group.map((b) => b.seat).join(", ")}
                     </p>
@@ -272,7 +306,11 @@ Check out my booking on Sproox!`,
                     {/* QR FIX */}
                     {first.qr_code_url && (
                       <img
-                        src={`http://127.0.0.1:8000${first.qr_code_url}`}
+                        src={
+                          first.qr_code_url.startsWith("http")
+                            ? first.qr_code_url
+                            : `${api.defaults.baseURL?.replace(/\/$/, "")}${first.qr_code_url}`
+                        }
                         crossOrigin="anonymous"
                         className="mt-4 w-24 mx-auto"
                         onError={(e) => {
@@ -301,16 +339,24 @@ Check out my booking on Sproox!`,
                     </button>
 
                     <button
-                      onClick={() => cancelBooking(group)}
-                      disabled={cancellingId === first.booking_id}
-                      className="bg-red-500 hover:bg-red-600 disabled:bg-red-300 text-white px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2"
+                      onClick={() => openCancelModal(group)}
+                      disabled={
+                        cancellingId === first.booking_id || !isCancellable(group)
+                      }
+                      className={`px-6 py-3 rounded-lg font-semibold transition flex items-center gap-2 ${
+                        isCancellable(group)
+                          ? "bg-red-500 hover:bg-red-600 text-white"
+                          : "bg-slate-300 text-slate-700 cursor-not-allowed"
+                      }`}
                     >
                       {cancellingId === first.booking_id ? (
                         <>
                           <span className="animate-spin">⏳</span> Cancelling...
                         </>
-                      ) : (
+                      ) : isCancellable(group) ? (
                         <>✕ Cancel Booking</>
+                      ) : (
+                        <>Cannot Cancel</>
                       )}
                     </button>
 
@@ -326,6 +372,46 @@ Check out my booking on Sproox!`,
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {cancelModalGroup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+            <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+              <h2 className="text-xl font-bold mb-3">Cancel Booking</h2>
+              <p className="text-sm text-slate-600 mb-4">
+                Confirm cancellation for the following booking details.
+              </p>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 mb-4">
+                <p className="font-semibold">Movie</p>
+                <p className="text-slate-700 mb-3">
+                  {cancelModalGroup[0].movie || cancelModalGroup[0].movie_name || cancelModalGroup[0].workspace || "Movie"}
+                </p>
+                <p className="font-semibold">Seats</p>
+                <p className="text-slate-700 mb-3">
+                  {cancelModalGroup.map((b) => b.seat).join(", ")}
+                </p>
+                <p className="font-semibold">Total</p>
+                <p className="text-slate-700">
+                  ₹{cancelModalGroup.reduce((sum, b) => sum + (b.price || 0), 0)}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3 justify-end">
+                <button
+                  onClick={closeCancelModal}
+                  className="rounded-full border border-slate-300 bg-white px-5 py-2 text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmCancelBooking}
+                  disabled={cancellingId === cancelModalGroup[0].booking_id}
+                  className="rounded-full bg-red-600 px-5 py-2 text-white hover:bg-red-700 disabled:bg-red-300"
+                >
+                  {cancellingId === cancelModalGroup[0].booking_id ? "Cancelling..." : "Confirm Cancel"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

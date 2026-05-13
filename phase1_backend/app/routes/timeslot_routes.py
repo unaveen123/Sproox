@@ -9,7 +9,7 @@ router = APIRouter(prefix="/provider", tags=["Provider TimeSlots"])
 
 
 # =========================
-# ⏱️ HELPER FUNCTION
+# ⏱️ HELPER FUNCTIONS
 # =========================
 def parse_time(time_str: str):
     try:
@@ -22,6 +22,21 @@ def parse_time(time_str: str):
                 status_code=400,
                 detail="Invalid time format. Use '10:00 AM' or '22:00'"
             )
+
+
+def time_to_minutes(t):
+    return t.hour * 60 + t.minute
+
+
+def time_intervals(start, end):
+    start_minutes = time_to_minutes(start)
+    end_minutes = time_to_minutes(end)
+
+    if start_minutes < end_minutes:
+        return [(start_minutes, end_minutes)]
+    if start_minutes > end_minutes:
+        return [(start_minutes, 24 * 60), (0, end_minutes)]
+    return []
 
 
 # =========================
@@ -76,8 +91,12 @@ def add_timeslot(
     start = parse_time(start_time)
     end = parse_time(end_time)
 
-    if start >= end:
-        raise HTTPException(status_code=400, detail="End time must be after start time")
+    if start == end:
+        raise HTTPException(status_code=400, detail="Start time and end time cannot be the same")
+
+    new_intervals = time_intervals(start, end)
+    if not new_intervals:
+        raise HTTPException(status_code=400, detail="Invalid timeslot interval")
 
     # 🔍 existing slots
     if is_theater:
@@ -95,9 +114,18 @@ def add_timeslot(
         raise HTTPException(status_code=400, detail="Max 10 slots allowed")
 
     # ⛔ overlap check
+    def overlaps(interval_a, interval_b):
+        return interval_a[0] < interval_b[1] and interval_b[0] < interval_a[1]
+
+    def slot_intervals(slot):
+        return time_intervals(slot.start_time, slot.end_time)
+
     for slot in existing_slots:
-        if not (end <= slot.start_time or start >= slot.end_time):
-            raise HTTPException(status_code=400, detail="Time overlap detected")
+        existing_intervals = slot_intervals(slot)
+        for new_interval in new_intervals:
+            for existing_interval in existing_intervals:
+                if overlaps(new_interval, existing_interval):
+                    raise HTTPException(status_code=400, detail="Time overlap detected")
 
     # ✅ create slot
     new_slot = models.TimeSlot(

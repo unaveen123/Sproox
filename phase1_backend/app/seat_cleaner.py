@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app import models
@@ -12,7 +12,7 @@ async def release_expired_seats():
         db: Session = SessionLocal()
 
         try:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             # find all reserved seats
             reserved_seats = db.query(models.Seat).filter(

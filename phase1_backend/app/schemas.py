@@ -1,9 +1,9 @@
 from pydantic import BaseModel, EmailStr, validator
 from datetime import time
-from typing import List, Optional
+from typing import Optional, List
 
 
-
+# -------------------- AUTH SCHEMAS --------------------
 
 class RegisterSchema(BaseModel):
     name: str
@@ -30,21 +30,21 @@ class OTPVerify(BaseModel):
     otp: str
 
 
+class LoginSchema(BaseModel):
+    email_or_phone: str
+    password: str
+
+
+# ✅ FORGOT PASSWORD
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 
+# ✅ RESET PASSWORD
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
-    otp: str
     new_password: str
     confirm_password: str
-
-    @validator("new_password")
-    def password_min_length(cls, v):
-        if len(v) < 5:
-            raise ValueError("Password must be at least 5 characters")
-        return v
 
     @validator("confirm_password")
     def passwords_match(cls, v, values):
@@ -53,35 +53,48 @@ class ResetPasswordRequest(BaseModel):
         return v
 
 
-class LoginSchema(BaseModel):
-    email_or_phone: str
-    password: str
+# -------------------- PROVIDER --------------------
 
 class ProviderApply(BaseModel):
     business_name: str
     email: EmailStr
     phone: str
 
+
+# -------------------- LOCATION --------------------
+
 class LocationCreate(BaseModel):
     name: str
     address: str
     city: str
-    description: str   
+    description: str
+
+
+# -------------------- SEATS --------------------
 
 class AddSeatsSchema(BaseModel):
     total_seats: int
-    price_per_hour: float  
+    price_per_hour: float
 
-class TimeSlotCreate(BaseModel):  
+
+# -------------------- TIMESLOTS --------------------
+
+class TimeSlotCreate(BaseModel):
     start_time: time
-    end_time: time  
+    end_time: time
+
+
+# -------------------- BOOKING --------------------
 
 class BookSeatSchema(BaseModel):
-    seat_id: Optional[str]=None
-    theater_seat_id: Optional[str]=None
+    seat_id: Optional[str] = None
+    theater_seat_id: Optional[str] = None
     slot_id: str
     booking_date: str  # YYYY-MM-DD
-        
+
+
+# -------------------- PAYMENT --------------------
+
 class PaymentOrderRequest(BaseModel):
     booking_ids: List[str]
 
@@ -93,6 +106,14 @@ class PaymentVerify(BaseModel):
     booking_ids: Optional[List[str]] = None
 
 
+# -------------------- TICKET --------------------
+
 class ScanTicket(BaseModel):
-    booking_id: str    
-   
+    booking_id: str
+
+
+# -------------------- MOVIES --------------------
+
+class MovieCastCreate(BaseModel):
+    name: str
+    role: str

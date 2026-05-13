@@ -10,33 +10,32 @@ const DeleteCompletedShows = () => {
 
   const [selectedLocation, setSelectedLocation] = useState("");
   const [selectedSlot, setSelectedSlot] = useState("");
-  const [movieName, setMovieName] = useState("");
+
+  const [message, setMessage] = useState("");
 
   const BASE_URL = "http://127.0.0.1:8000";
+  const token = localStorage.getItem("token");
 
-  // ✅ FETCH LOCATIONS
+  // FETCH LOCATIONS
   useEffect(() => {
     const fetchLocations = async () => {
       try {
         const res = await axios.get(
           `${BASE_URL}/provider/location/my-locations`,
           {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
+            headers: { Authorization: `Bearer ${token}` },
           }
         );
-
         setLocations(res.data || []);
-      } catch (err) {
-        console.log("Location error:", err);
+      } catch {
+        setMessage("❌ Failed to load locations");
       }
     };
 
     fetchLocations();
   }, []);
 
-  // ✅ FETCH TIMESLOTS (🔥 CORRECT API)
+  // FETCH SLOTS
   useEffect(() => {
     if (!selectedLocation) {
       setSlots([]);
@@ -45,22 +44,17 @@ const DeleteCompletedShows = () => {
 
     const fetchSlots = async () => {
       try {
-        // ✅ CORRECT API (DOUBLE provider)
         const res = await axios.get(
-          `${BASE_URL}/provider/provider/location/${selectedLocation}/timeslots`,
+          `${BASE_URL}/provider/location/${selectedLocation}/timeslots`,
           {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
+            headers: { Authorization: `Bearer ${token}` },
           }
         );
 
-        console.log("SLOTS:", res.data);
-
         setSlots(Array.isArray(res.data) ? res.data : []);
-      } catch (err) {
-        console.log("Slot error:", err);
+      } catch {
         setSlots([]);
+        setMessage("❌ Failed to load slots");
       }
     };
 
@@ -68,109 +62,127 @@ const DeleteCompletedShows = () => {
     setSelectedSlot("");
   }, [selectedLocation]);
 
-  // ✅ DELETE COMPLETED SHOW
+  // DELETE
   const handleDelete = async () => {
-    if (!selectedLocation || !selectedSlot || !movieName) {
-      alert("⚠️ All fields required");
+    if (!selectedLocation || !selectedSlot) {
+      setMessage("⚠️ Select location and slot");
       return;
     }
 
     if (!window.confirm("Are you sure to delete this show?")) return;
 
     try {
-      await axios.delete(`${BASE_URL}/provider/delete-completed-shows`, {
-        params: {
-          location_id: selectedLocation,
-          movie_name: movieName,
-          slot_id: selectedSlot,
-        },
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-      });
+      await axios.delete(
+        `${BASE_URL}/provider/delete-completed-shows?location_id=${selectedLocation}&slot_id=${selectedSlot}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
-      alert("✅ Completed show deleted successfully");
-
-      // reset
-      setMovieName("");
-      setSelectedSlot("");
+      setMessage("✅ Completed show deleted successfully");
 
     } catch (err) {
-      console.log(err);
-      alert(
+      setMessage(
         err?.response?.data?.detail ||
-        "❌ Error deleting completed show"
+          "❌ Error deleting completed show"
       );
     }
   };
 
+  // AUTO HIDE
+  useEffect(() => {
+    if (message) {
+      const t = setTimeout(() => setMessage(""), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [message]);
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 to-black">
-      <div className="bg-purple-800 p-8 rounded-2xl w-[400px] shadow-lg">
+    <div className="min-h-screen bg-gray-100 p-6">
+
+      {/* TOAST */}
+      {message && (
+        <div className="fixed top-5 right-5 px-4 py-3 rounded shadow-lg text-white bg-green-500">
+          {message}
+        </div>
+      )}
+
+      {/* ALIGN FIX */}
+      <div className="max-w-3xl mx-auto">
 
         {/* BACK */}
         <button
-          onClick={() => navigate("/")}
-          className="text-white mb-4"
+          onClick={() => navigate("/provider/dashboard")}
+          className="mb-4 px-5 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-700 font-medium"
         >
-          ← Back
+          Back
         </button>
 
-        <h2 className="text-white text-xl mb-6 text-center">
-          🗑 Delete Completed Shows
-        </h2>
+        {/* CARD */}
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
 
-        {/* LOCATION */}
-        <select
-          className="w-full mb-4 p-3 rounded bg-purple-600 text-white"
-          value={selectedLocation}
-          onChange={(e) => setSelectedLocation(e.target.value)}
-        >
-          <option value="">Select Location</option>
-          {locations.map((loc) => (
-            <option key={loc.id} value={loc.id}>
-              {loc.name || loc.location_name}
-            </option>
-          ))}
-        </select>
+          {/* HEADER */}
+          <div className="bg-gradient-to-r from-purple-600 to-pink-500 p-6 text-white">
+            <h2 className="text-2xl font-bold">
+              Delete Completed Shows
+            </h2>
+          </div>
 
-        {/* SLOT */}
-        <select
-          className="w-full mb-4 p-3 rounded bg-purple-600 text-white"
-          value={selectedSlot}
-          onChange={(e) => setSelectedSlot(e.target.value)}
-          disabled={!selectedLocation}
-        >
-          <option value="">
-            {slots.length === 0
-              ? "⚠️ No Slots Found"
-              : "Select Slot"}
-          </option>
+          {/* BODY */}
+          <div className="p-6">
 
-          {slots.map((slot) => (
-            <option key={slot.id} value={slot.id}>
-              🎬 {slot.movie_name} ({slot.start_time} - {slot.end_time})
-            </option>
-          ))}
-        </select>
+            {/* LOCATION */}
+            <select
+              value={selectedLocation}
+              onChange={(e) => setSelectedLocation(e.target.value)}
+              className="w-full mb-4 p-3 rounded-lg border border-gray-300"
+            >
+              <option value="">Select Location</option>
+              {locations.map((loc, index) => {
+                const locationId = loc.id || loc.location_id;
+                const locationName = loc.name || loc.location_name;
 
-        {/* MOVIE NAME */}
-        <input
-          type="text"
-          placeholder="Movie Name (case-sensitive)"
-          className="w-full mb-4 p-3 rounded bg-purple-600 text-white placeholder-white"
-          value={movieName}
-          onChange={(e) => setMovieName(e.target.value)}
-        />
+                return (
+                  <option key={locationId || index} value={locationId}>
+                    {locationName}
+                  </option>
+                );
+              })}
+            </select>
 
-        {/* DELETE */}
-        <button
-          onClick={handleDelete}
-          className="w-full py-3 bg-red-500 rounded text-white font-semibold"
-        >
-          Delete Completed Show
-        </button>
+            {/* SLOT */}
+            <select
+              value={selectedSlot}
+              onChange={(e) => setSelectedSlot(e.target.value)}
+              disabled={!selectedLocation}
+              className="w-full mb-3 p-3 rounded-lg border border-gray-300"
+            >
+              <option value="">Select Slot</option>
 
+              {slots.map((slot) => (
+                <option key={slot.id} value={slot.id}>
+                  🎬 {slot.movie_name} ({slot.start_time} - {slot.end_time})
+                </option>
+              ))}
+            </select>
+
+            {/* NO SLOT MESSAGE */}
+            {selectedLocation && slots.length === 0 && (
+              <p className="text-yellow-600 text-sm mb-3">
+                ⚠️ No slots available for this location
+              </p>
+            )}
+
+            {/* DELETE */}
+            <button
+              onClick={handleDelete}
+              className="w-full py-3 rounded-lg text-white font-semibold bg-red-500 hover:bg-red-600"
+            >
+              Delete Completed Show
+            </button>
+
+          </div>
+        </div>
       </div>
     </div>
   );
